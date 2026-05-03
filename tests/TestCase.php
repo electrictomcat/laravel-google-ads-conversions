@@ -2,9 +2,9 @@
 
 namespace ElectricTomCat\GoogleAdsConversions\Tests;
 
+use ElectricTomCat\GoogleAdsConversions\GoogleAdsConversionsServiceProvider;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Orchestra\Testbench\TestCase as Orchestra;
-use ElectricTomCat\GoogleAdsConversions\GoogleAdsConversionsServiceProvider;
 
 class TestCase extends Orchestra
 {

@@ -2,9 +2,9 @@
 
 namespace ElectricTomCat\GoogleAdsConversions;
 
+use ElectricTomCat\GoogleAdsConversions\Commands\GoogleAdsConversionsCommand;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
-use ElectricTomCat\GoogleAdsConversions\Commands\GoogleAdsConversionsCommand;
 
 class GoogleAdsConversionsServiceProvider extends PackageServiceProvider
 {
