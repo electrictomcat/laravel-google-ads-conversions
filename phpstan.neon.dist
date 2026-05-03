@@ -8,3 +8,11 @@ parameters:
         - config
         - database
     tmpDir: build/phpstan
+    ignoreErrors:
+        # Larastan's noEnvCallsOutsideOfConfig rule misfires for packages
+        # because there's no booted Laravel app for app()->configPath() to
+        # compare against. The env() calls below ARE in a config file, just
+        # not in a host app's config directory.
+        -
+            identifier: larastan.noEnvCallsOutsideOfConfig
+            path: config/*
