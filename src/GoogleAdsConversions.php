@@ -5,6 +5,7 @@ namespace ElectricTomCat\GoogleAdsConversions;
 use ElectricTomCat\GoogleAdsConversions\Contracts\HasConversions;
 use ElectricTomCat\GoogleAdsConversions\Models\Lead;
 use ElectricTomCat\GoogleAdsConversions\Support\EventResolver;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Session;
@@ -203,7 +204,7 @@ class GoogleAdsConversions
     }
 
     /**
-     * @return class-string<HasConversions&\Illuminate\Database\Eloquent\Model>
+     * @return class-string<HasConversions&Model>
      */
     protected function modelClass(): string
     {

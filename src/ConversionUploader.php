@@ -11,6 +11,7 @@ use Google\Ads\GoogleAds\Lib\V23\GoogleAdsClientBuilder;
 use Google\Ads\GoogleAds\V23\Services\ClickConversion;
 use Google\Ads\GoogleAds\V23\Services\SearchGoogleAdsRequest;
 use Google\Ads\GoogleAds\V23\Services\UploadClickConversionsRequest;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
@@ -197,7 +198,7 @@ class ConversionUploader
     }
 
     /**
-     * @return class-string<HasConversions&\Illuminate\Database\Eloquent\Model>
+     * @return class-string<HasConversions&Model>
      */
     protected function modelClass(): string
     {
