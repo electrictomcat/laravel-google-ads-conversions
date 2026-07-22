@@ -82,6 +82,19 @@ GoogleAdsConversions::record(
 );
 ```
 
+### Reading the current visitor's GCLID
+
+If you store the GCLID on your own records, ask the package for it directly:
+
+```php
+$submission = ContactSubmission::create([
+    'name' => $request->name,
+    'gclid' => GoogleAdsConversions::gclid(),   // string|null
+]);
+```
+
+`gclid()` runs the same session → cookie → visitor-history lookup that `record()` uses, and is memoized for the lifetime of the request, so calling it several times in one request won't repeat the visitor-history database query. Call `GoogleAdsConversions::forgetGclid()` to clear the memo (useful in tests or long-running workers).
+
 ### Mapping events to Google Ads conversion actions
 
 Edit `config/google-ads-conversions.php`. Each event entry is either a **string** (just the action name) or an **array** with optional value/currency defaults:
