@@ -14,7 +14,7 @@ Drop-in offline conversion tracking for Laravel apps using Google Ads.
 - Bring-your-own model — implement a small contract or use the included `Lead` model out of the box
 - Supports both call-site values (`record('Event', 100)`) and config-mapped defaults
 
-> **Status: pre-release.** Not yet on Packagist.
+Requires PHP 8.3+ and Laravel 11, 12, or 13.
 
 ## Installation
 

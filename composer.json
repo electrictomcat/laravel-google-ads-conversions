@@ -1,18 +1,41 @@
 {
     "name": "electrictomcat/laravel-google-ads-conversions",
-    "description": "Drop-in offline conversion tracking for Laravel apps using Google Ads.",
+    "description": "Drop-in offline conversion tracking for Laravel: captures GCLIDs from ad clicks, buffers conversions in cache, and uploads them to the Google Ads API.",
+    "type": "library",
     "keywords": [
-        "electrictomcat",
         "laravel",
-        "laravel-google-ads-conversions"
+        "google-ads",
+        "adwords",
+        "conversion-tracking",
+        "offline-conversions",
+        "gclid",
+        "gbraid",
+        "attribution",
+        "lead-tracking",
+        "ppc",
+        "marketing",
+        "analytics"
     ],
     "homepage": "https://github.com/electrictomcat/laravel-google-ads-conversions",
+    "readme": "README.md",
     "license": "MIT",
     "authors": [
         {
             "name": "Tom Michael",
             "email": "tom@theelectricfamily.com",
+            "homepage": "https://github.com/electrictomcat",
             "role": "Developer"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/electrictomcat/laravel-google-ads-conversions/issues",
+        "source": "https://github.com/electrictomcat/laravel-google-ads-conversions",
+        "docs": "https://github.com/electrictomcat/laravel-google-ads-conversions#readme"
+    },
+    "funding": [
+        {
+            "type": "github",
+            "url": "https://github.com/sponsors/electrictomcat"
         }
     ],
     "require": {
