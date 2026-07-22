@@ -31,7 +31,38 @@ class GoogleAdsConversions
 
     public const BUFFER_TTL_DAYS = 2;
 
+    protected ?string $memoizedGclid = null;
+
+    protected bool $gclidMemoized = false;
+
     public function __construct(protected EventResolver $events) {}
+
+    /**
+     * The GCLID for the current visitor, or null if none can be found.
+     *
+     * Memoized for the lifetime of the request so repeated call sites
+     * (e.g. several form submissions in one controller) don't re-run the
+     * visitor-history database lookup.
+     */
+    public function gclid(): ?string
+    {
+        if (! $this->gclidMemoized) {
+            $this->memoizedGclid = $this->resolveGclid();
+            $this->gclidMemoized = true;
+        }
+
+        return $this->memoizedGclid;
+    }
+
+    /**
+     * Discard the memoized GCLID, forcing the next gclid() call to resolve
+     * again. Useful in tests and long-running workers.
+     */
+    public function forgetGclid(): void
+    {
+        $this->memoizedGclid = null;
+        $this->gclidMemoized = false;
+    }
 
     /**
      * Record a conversion event for the current visitor.
@@ -46,7 +77,7 @@ class GoogleAdsConversions
         ?string $currency = null,
         ?string $gclid = null,
     ): void {
-        $gclid = $gclid ?? $this->resolveGclid();
+        $gclid = $gclid ?? $this->gclid();
 
         if (! $gclid) {
             Log::warning("[GoogleAdsConversions] Failed to record '{$eventName}': no GCLID found in override, session, cookie, or visitor history.");
