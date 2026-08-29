@@ -6,16 +6,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Google Ads API Credentials
+    | Default Channel & Enabled Channels
     |--------------------------------------------------------------------------
     |
-    | Generate the OAuth client and refresh token using Google's offline
-    | conversion authentication flow:
-    | https://developers.google.com/google-ads/api/docs/oauth/cloud-project
+    | Supported channels: 'google', 'meta', 'microsoft', 'linkedin', 'tiktok'
     |
-    | If your OAuth refresh token belongs to a Manager Account (MCC) that
-    | manages client sub-accounts, set `login_customer_id` to your MCC ID.
-    |
+    */
+
+    'default_channel' => env('AD_CONVERSIONS_DEFAULT_CHANNEL', 'google'),
+
+    'enabled_channels' => [
+        'google',
+        'meta',
+        'microsoft',
+        'linkedin',
+        'tiktok',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Google Ads API Credentials
+    |--------------------------------------------------------------------------
     */
 
     'developer_token' => env('GOOGLE_ADS_DEVELOPER_TOKEN'),
@@ -29,12 +40,70 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Dry-Run / Validation Mode
+    | Meta (Facebook / Instagram) Conversions API (CAPI)
+    |--------------------------------------------------------------------------
+    */
+
+    'meta' => [
+        'pixel_id' => env('META_PIXEL_ID'),
+        'access_token' => env('META_ACCESS_TOKEN'),
+        'test_event_code' => env('META_TEST_EVENT_CODE'),
+        'api_version' => env('META_API_VERSION', 'v20.0'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Microsoft (Bing) Advertising Offline Conversions
+    |--------------------------------------------------------------------------
+    */
+
+    'microsoft' => [
+        'developer_token' => env('MICROSOFT_ADS_DEVELOPER_TOKEN'),
+        'customer_id' => env('MICROSOFT_ADS_CUSTOMER_ID'),
+        'access_token' => env('MICROSOFT_ADS_ACCESS_TOKEN'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | LinkedIn Conversions API
+    |--------------------------------------------------------------------------
+    */
+
+    'linkedin' => [
+        'access_token' => env('LINKEDIN_ACCESS_TOKEN'),
+        'conversion_rule_id' => env('LINKEDIN_CONVERSION_RULE_ID'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | TikTok Events API (Server-to-Server)
+    |--------------------------------------------------------------------------
+    */
+
+    'tiktok' => [
+        'access_token' => env('TIKTOK_ACCESS_TOKEN'),
+        'pixel_code' => env('TIKTOK_PIXEL_CODE'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | In-App Analytics & Reporting Dashboard
     |--------------------------------------------------------------------------
     |
-    | When enabled (validate_only = true), API requests are validated by Google
-    | Ads without creating real conversion records. Useful in staging or tests.
+    | Enables an embedded conversion reporting dashboard in your application.
     |
+    */
+
+    'dashboard' => [
+        'enabled' => (bool) env('AD_CONVERSIONS_DASHBOARD_ENABLED', true),
+        'path' => 'ad-conversions',
+        'middleware' => ['web'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Dry-Run / Validation Mode
+    |--------------------------------------------------------------------------
     */
 
     'validate_only' => (bool) env('GOOGLE_ADS_VALIDATE_ONLY', false),
@@ -43,10 +112,6 @@ return [
     |--------------------------------------------------------------------------
     | Batch Size
     |--------------------------------------------------------------------------
-    |
-    | Maximum number of conversions uploaded per Google Ads API request.
-    | Google Ads API supports up to 2,000 conversions per batch.
-    |
     */
 
     'batch_size' => (int) env('GOOGLE_ADS_BATCH_SIZE', 2000),
@@ -55,12 +120,6 @@ return [
     |--------------------------------------------------------------------------
     | Lead model
     |--------------------------------------------------------------------------
-    |
-    | The Eloquent model used to persist conversions. Ships with a sensible
-    | default; replace with your own model if you'd rather bring your own
-    | (it must implement ElectricTomCat\GoogleAdsConversions\Contracts\HasConversions
-    | -- the easiest way is to `use HasConversionsTrait`).
-    |
     */
 
     'model' => Lead::class,
@@ -69,11 +128,6 @@ return [
     |--------------------------------------------------------------------------
     | Table name
     |--------------------------------------------------------------------------
-    |
-    | The table the default Lead model uses. Override only if you've published
-    | the migration and renamed the table; ignored entirely if you point
-    | `model` at a class that sets its own $table.
-    |
     */
 
     'table' => 'leads',
@@ -82,11 +136,6 @@ return [
     |--------------------------------------------------------------------------
     | Upload delay
     |--------------------------------------------------------------------------
-    |
-    | Google Ads requires offline conversions to be at least a few hours old
-    | before they show up in reporting. Conversions younger than this are
-    | held back and uploaded on a later run.
-    |
     */
 
     'upload_delay_hours' => env('GOOGLE_ADS_UPLOAD_DELAY_HOURS', 6),
@@ -95,10 +144,6 @@ return [
     |--------------------------------------------------------------------------
     | Default currency
     |--------------------------------------------------------------------------
-    |
-    | Used when neither the call site nor the per-event config specifies one.
-    | Must be a valid ISO 4217 3-letter currency code (e.g. 'USD', 'EUR').
-    |
     */
 
     'default_currency' => env('GOOGLE_ADS_DEFAULT_CURRENCY', 'USD'),
@@ -107,39 +152,14 @@ return [
     |--------------------------------------------------------------------------
     | Unmapped Events Fallback
     |--------------------------------------------------------------------------
-    |
-    | When true, if an event name passed to record() is not mapped in the `events`
-    | array below, the event name itself will be used as the Google Ads conversion
-    | action name. If false, unmapped events are skipped.
-    |
     */
 
     'allow_unmapped_events' => (bool) env('GOOGLE_ADS_ALLOW_UNMAPPED_EVENTS', true),
 
     /*
     |--------------------------------------------------------------------------
-    | Events
+    | Events mapping
     |--------------------------------------------------------------------------
-    |
-    | Map your internal event names to Google Ads conversion actions. Each
-    | event may be either:
-    |
-    |   - A string -- the conversion action name (or full resource path
-    |     "customers/{id}/conversionActions/{actionId}")
-    |
-    |   - An array with these keys:
-    |       'action'   => string  (required) the action name or resource path
-    |       'value'    => float   (optional) default value if call site omits one
-    |       'currency' => string  (optional) default currency if call site omits one
-    |
-    | Both the call site and this config can supply a value/currency. The
-    | call site always wins; this config is the fallback. If neither
-    | provides a value, the conversion is uploaded without a value.
-    |
-    | Event names beginning with "Page Navigation: " match the "Page
-    | Navigation" event by prefix. Use this for per-URL micro-conversions
-    | that all roll up into a single Google Ads conversion action.
-    |
     */
 
     'events' => [
@@ -151,7 +171,7 @@ return [
         //     'value'    => 250.00,
         //     'currency' => 'USD',
         // ],
-        // 'Page Navigation' => 'Page Navigation', // catches "Page Navigation: /path"
+        // 'Page Navigation' => 'Page Navigation',
 
     ],
 
@@ -159,19 +179,6 @@ return [
     |--------------------------------------------------------------------------
     | European & UK Privacy Controls (GDPR / ePrivacy)
     |--------------------------------------------------------------------------
-    |
-    | Configures privacy guards for cookie dropping and data retention:
-    |
-    | - `cookie_consent`:
-    |     'auto'   => Check incoming request cookies for common CMP consent
-    |                 (Cookiebot, OneTrust, Spatie, etc.) before dropping cookies.
-    |     'always' => Always queue persistent cookies on landing (standard US mode).
-    |     'never'  => Never queue persistent marketing cookies (session-only).
-    |
-    | - `retention_days`:
-    |     Number of days to keep lead records in the database. Eloquent's
-    |     prunable command (php artisan model:prune) will clean up older leads.
-    |
     */
 
     'privacy' => [
@@ -189,10 +196,6 @@ return [
     |--------------------------------------------------------------------------
     | Google Consent Mode v2 Signals
     |--------------------------------------------------------------------------
-    |
-    | Consent signals attached to uploaded click conversions for Google Ads API.
-    | Set to 'GRANTED', 'DENIED', or null (omits the field).
-    |
     */
 
     'consent' => [
@@ -204,11 +207,6 @@ return [
     |--------------------------------------------------------------------------
     | Enhanced Conversions for Leads (First-Party User Data)
     |--------------------------------------------------------------------------
-    |
-    | When enabled, optional first-party data (email, phone) passed to record()
-    | will be SHA-256 hashed and uploaded alongside the click conversion to
-    | improve match rates. Disabled by default for data minimization.
-    |
     */
 
     'enhanced_conversions' => [
@@ -219,18 +217,19 @@ return [
     |--------------------------------------------------------------------------
     | Cookies and session
     |--------------------------------------------------------------------------
-    |
-    | Names used by the CaptureGclid middleware.
-    |
     */
 
     'cookies' => [
         'gclid' => 'google_ads_gclid',
         'gbraid' => 'google_ads_gbraid',
         'wbraid' => 'google_ads_wbraid',
+        'fbclid' => 'meta_ads_fbclid',
+        'msclkid' => 'ms_ads_msclkid',
+        'ttclid' => 'tiktok_ads_ttclid',
+        'li_fat_id' => 'linkedin_ads_lifatid',
         'visitor_id' => 'google_ads_visitor_id',
         'lifetime_minutes' => 60 * 24 * 30, // 30 days
-        'domain' => null, // null = current host; set to ".example.com" for cross-subdomain
+        'domain' => null,
         'secure' => env('SESSION_SECURE_COOKIE', null),
         'http_only' => false,
         'same_site' => 'Lax',
@@ -241,17 +240,16 @@ return [
         'gclid' => 'google_ads_gclid',
         'gbraid' => 'google_ads_gbraid',
         'wbraid' => 'google_ads_wbraid',
+        'fbclid' => 'meta_ads_fbclid',
+        'msclkid' => 'ms_ads_msclkid',
+        'ttclid' => 'tiktok_ads_ttclid',
+        'li_fat_id' => 'linkedin_ads_lifatid',
     ],
 
     /*
     |--------------------------------------------------------------------------
     | Tracking data
     |--------------------------------------------------------------------------
-    |
-    | Query parameters the middleware harvests from the landing URL and
-    | tries to persist on the model (via fillTrackingData). Only columns
-    | listed in your model's $fillable will actually be written.
-    |
     */
 
     'tracked_query_parameters' => [
@@ -262,6 +260,10 @@ return [
         'utm_term',
         'gad_source',
         'gad_campaignid',
+        'fbclid',
+        'msclkid',
+        'ttclid',
+        'li_fat_id',
     ],
 
 ];
