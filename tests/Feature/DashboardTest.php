@@ -17,7 +17,7 @@ it('renders the embedded analytics dashboard at configured route', function () {
     $response = $this->get('/ad-conversions');
 
     $response->assertOk();
-    $response->assertSee('OmniTrack Conversions');
+    $response->assertSee('OmniSignal');
     $response->assertSee('Quote Form');
     $response->assertSee('200.00');
 });

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OmniTrack &bull; Conversion Analytics Dashboard</title>
+    <title>OmniSignal &bull; Conversion Analytics Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased">
@@ -13,10 +13,10 @@
             <div>
                 <div class="flex items-center space-x-3">
                     <span class="text-2xl">⚡</span>
-                    <h1 class="text-2xl font-bold tracking-tight text-white">OmniTrack Conversions</h1>
+                    <h1 class="text-2xl font-bold tracking-tight text-white">OmniSignal</h1>
                     <span class="inline-flex items-center rounded-md bg-emerald-400/10 px-2 py-1 text-xs font-medium text-emerald-400 ring-1 ring-inset ring-emerald-400/20">v2.0 Active</span>
                 </div>
-                <p class="mt-1 text-sm text-slate-400">Real-time server-side offline conversion tracking & delivery analytics</p>
+                <p class="mt-1 text-sm text-slate-400">Server-side offline conversion tracking & delivery analytics &bull; <a href="https://omnisignal.dev" target="_blank" class="text-indigo-400 hover:underline">omnisignal.dev</a></p>
             </div>
             <div class="mt-4 md:mt-0 flex items-center space-x-3">
                 <a href="{{ url()->current() }}" class="inline-flex items-center rounded-lg bg-slate-800 px-3.5 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-700 shadow-sm transition">

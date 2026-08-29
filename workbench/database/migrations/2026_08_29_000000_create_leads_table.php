@@ -1,0 +1,35 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('leads', function (Blueprint $table) {
+            $table->id();
+            $table->string('gclid')->nullable()->unique();
+            $table->string('gbraid')->nullable()->index();
+            $table->string('wbraid')->nullable()->index();
+            $table->uuid('visitor_id')->nullable()->index();
+            $table->json('conversions')->nullable();
+            $table->text('landing_page')->nullable();
+            $table->string('source')->nullable();
+            $table->string('utm_source')->nullable();
+            $table->string('utm_medium')->nullable();
+            $table->string('utm_campaign')->nullable();
+            $table->string('utm_content')->nullable();
+            $table->string('utm_term')->nullable();
+            $table->string('gad_source')->nullable();
+            $table->string('gad_campaignid')->nullable();
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('leads');
+    }
+};

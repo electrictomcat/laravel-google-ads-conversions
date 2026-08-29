@@ -11,12 +11,13 @@ class InstallCommand extends Command
     protected $signature = 'ad-conversions:install
                             {--channel=* : Specific channels to configure}';
 
-    protected $description = 'Interactive setup wizard for OmniTrack ad conversion tracking';
+    protected $description = 'Interactive setup wizard for OmniSignal conversion tracking (omnisignal.dev)';
 
     public function handle(ConversionManager $manager): int
     {
         $this->info('====================================================');
-        $this->info('  🚀 Welcome to OmniTrack Conversion Setup Wizard   ');
+        $this->info('  🚀 Welcome to OmniSignal Setup Wizard             ');
+        $this->info('  🌐 https://omnisignal.dev                         ');
         $this->info('====================================================');
         $this->newLine();
 
@@ -44,7 +45,8 @@ class InstallCommand extends Command
         $this->callSilent('vendor:publish', ['--tag' => 'laravel-google-ads-conversions-config']);
         $this->callSilent('vendor:publish', ['--tag' => 'laravel-google-ads-conversions-migrations']);
 
-        $this->info('✅ Installation and setup completed!');
+        $this->info('✅ OmniSignal installation and setup completed!');
+        $this->info('Visit your analytics dashboard at /ad-conversions');
         $this->info('Run "php artisan ad-conversions:test" or "php artisan google-ads:test-connection" anytime to verify your connections.');
 
         return self::SUCCESS;
