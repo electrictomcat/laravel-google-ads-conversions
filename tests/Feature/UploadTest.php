@@ -4,7 +4,9 @@ use ElectricTomCat\GoogleAdsConversions\ConversionUploader;
 use ElectricTomCat\GoogleAdsConversions\GoogleAdsConversions;
 use ElectricTomCat\GoogleAdsConversions\Jobs\UploadPendingConversions;
 use ElectricTomCat\GoogleAdsConversions\Models\Lead;
+use ElectricTomCat\GoogleAdsConversions\Support\ConsentManager;
 use ElectricTomCat\GoogleAdsConversions\Support\EventResolver;
+use ElectricTomCat\GoogleAdsConversions\Support\UserDataHasher;
 use Illuminate\Support\Str;
 
 it('runs sync before upload from the queued job', function () {
@@ -48,17 +50,23 @@ it('uploads only conversions older than the configured delay', function () {
 
     $uploader = Mockery::mock(ConversionUploader::class.'[uploadBatch]', [
         app(EventResolver::class),
+        app(ConsentManager::class),
+        app(UserDataHasher::class),
     ]);
 
     $uploader->shouldReceive('uploadBatch')
         ->once()
-        ->andReturnUsing(function ($l, $batch, $indices) {
-            $conversions = $l->getConversions()->toArray();
-            foreach ($indices as $i) {
+        ->andReturnUsing(function ($batchItems, $clicks, $validateOnly = null) {
+            foreach ($batchItems as $item) {
+                $l = $item['lead'];
+                $i = $item['index'];
+                $conversions = $l->getConversions()->toArray();
                 $conversions[$i]['status'] = 'uploaded';
+                $l->setConversions($conversions);
+                $l->persist();
             }
-            $l->setConversions($conversions);
-            $l->persist();
+
+            return count($clicks);
         });
 
     $uploader->uploadPendingConversions();

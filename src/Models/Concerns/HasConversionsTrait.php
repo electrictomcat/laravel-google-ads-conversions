@@ -8,8 +8,10 @@ use Illuminate\Support\Collection;
  * Default implementation of the HasConversions contract for Eloquent models.
  *
  * Assumes the model has the following columns:
- *   - gclid (string, unique)
- *   - visitor_id (uuid, nullable)
+ *   - gclid (string, nullable, unique)
+ *   - gbraid (string, nullable, indexed)
+ *   - wbraid (string, nullable, indexed)
+ *   - visitor_id (uuid, nullable, indexed)
  *   - conversions (jsonb, nullable, cast as Collection)
  *
  * And optionally any of the tracking columns the middleware tries to fill:
@@ -25,9 +27,29 @@ trait HasConversionsTrait
         return $this->gclid;
     }
 
-    public function setGclid(string $gclid): void
+    public function setGclid(?string $gclid): void
     {
         $this->gclid = $gclid;
+    }
+
+    public function getGbraid(): ?string
+    {
+        return $this->gbraid;
+    }
+
+    public function setGbraid(?string $gbraid): void
+    {
+        $this->gbraid = $gbraid;
+    }
+
+    public function getWbraid(): ?string
+    {
+        return $this->wbraid;
+    }
+
+    public function setWbraid(?string $wbraid): void
+    {
+        $this->wbraid = $wbraid;
     }
 
     public function getVisitorId(): ?string
@@ -54,7 +76,13 @@ trait HasConversionsTrait
 
     public function fillTrackingData(array $data): void
     {
-        $this->fill(array_intersect_key($data, array_flip($this->getFillable())));
+        $fillable = $this->getFillable();
+
+        if (! empty($fillable)) {
+            $data = array_intersect_key($data, array_flip($fillable));
+        }
+
+        $this->fill($data);
     }
 
     public function persist(): bool

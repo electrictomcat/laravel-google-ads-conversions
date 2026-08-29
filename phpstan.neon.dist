@@ -8,6 +8,8 @@ parameters:
         - config
         - database
     tmpDir: build/phpstan
+    parallel:
+        maximumNumberOfProcesses: 1
     ignoreErrors:
         # Larastan's noEnvCallsOutsideOfConfig rule misfires for packages
         # because there's no booted Laravel app for app()->configPath() to

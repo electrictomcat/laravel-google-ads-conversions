@@ -10,7 +10,9 @@ return new class extends Migration
     {
         Schema::create(config('google-ads-conversions.table', 'leads'), function (Blueprint $table) {
             $table->id();
-            $table->string('gclid')->unique()->index();
+            $table->string('gclid')->nullable()->unique();
+            $table->string('gbraid')->nullable()->index();
+            $table->string('wbraid')->nullable()->index();
             $table->uuid('visitor_id')->nullable()->index();
             $table->json('conversions')->nullable();
             $table->text('landing_page')->nullable();

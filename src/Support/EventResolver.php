@@ -21,11 +21,15 @@ class EventResolver
     {
         $entry = $this->findEntry($event);
 
-        if ($entry === null) {
-            return null;
+        if ($entry !== null) {
+            return is_array($entry) ? ($entry['action'] ?? null) : $entry;
         }
 
-        return is_array($entry) ? ($entry['action'] ?? null) : $entry;
+        if (config('google-ads-conversions.allow_unmapped_events', true)) {
+            return $event;
+        }
+
+        return null;
     }
 
     /**
@@ -54,16 +58,16 @@ class EventResolver
     public function currency(string $event, ?string $callSiteCurrency): string
     {
         if ($callSiteCurrency !== null) {
-            return $callSiteCurrency;
+            return strtoupper(trim($callSiteCurrency));
         }
 
         $entry = $this->findEntry($event);
 
         if (is_array($entry) && isset($entry['currency'])) {
-            return (string) $entry['currency'];
+            return strtoupper(trim((string) $entry['currency']));
         }
 
-        return (string) config('google-ads-conversions.default_currency', 'USD');
+        return strtoupper((string) config('google-ads-conversions.default_currency', 'USD'));
     }
 
     /**

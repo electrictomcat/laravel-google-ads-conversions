@@ -8,7 +8,15 @@ interface HasConversions
 {
     public function getGclid(): ?string;
 
-    public function setGclid(string $gclid): void;
+    public function setGclid(?string $gclid): void;
+
+    public function getGbraid(): ?string;
+
+    public function setGbraid(?string $gbraid): void;
+
+    public function getWbraid(): ?string;
+
+    public function setWbraid(?string $wbraid): void;
 
     public function getVisitorId(): ?string;
 

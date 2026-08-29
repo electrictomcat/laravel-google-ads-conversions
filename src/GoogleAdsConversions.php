@@ -2,10 +2,15 @@
 
 namespace ElectricTomCat\GoogleAdsConversions;
 
+use DateTimeInterface;
 use ElectricTomCat\GoogleAdsConversions\Contracts\HasConversions;
+use ElectricTomCat\GoogleAdsConversions\Events\ConversionRecorded;
+use ElectricTomCat\GoogleAdsConversions\Events\ConversionsSynced;
 use ElectricTomCat\GoogleAdsConversions\Models\Lead;
 use ElectricTomCat\GoogleAdsConversions\Support\EventResolver;
+use ElectricTomCat\GoogleAdsConversions\Support\UserDataHasher;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Session;
@@ -33,21 +38,28 @@ class GoogleAdsConversions
 
     protected ?string $memoizedGclid = null;
 
+    protected ?string $memoizedGbraid = null;
+
+    protected ?string $memoizedWbraid = null;
+
     protected bool $gclidMemoized = false;
 
-    public function __construct(protected EventResolver $events) {}
+    protected bool $gbraidMemoized = false;
+
+    protected bool $wbraidMemoized = false;
+
+    public function __construct(
+        protected EventResolver $events,
+        protected UserDataHasher $hasher,
+    ) {}
 
     /**
      * The GCLID for the current visitor, or null if none can be found.
-     *
-     * Memoized for the lifetime of the request so repeated call sites
-     * (e.g. several form submissions in one controller) don't re-run the
-     * visitor-history database lookup.
      */
     public function gclid(): ?string
     {
         if (! $this->gclidMemoized) {
-            $this->memoizedGclid = $this->resolveGclid();
+            $this->memoizedGclid = $this->resolveIdentifier('gclid');
             $this->gclidMemoized = true;
         }
 
@@ -55,32 +67,82 @@ class GoogleAdsConversions
     }
 
     /**
-     * Discard the memoized GCLID, forcing the next gclid() call to resolve
-     * again. Useful in tests and long-running workers.
+     * The GBRAID for the current visitor, or null if none can be found.
+     */
+    public function gbraid(): ?string
+    {
+        if (! $this->gbraidMemoized) {
+            $this->memoizedGbraid = $this->resolveIdentifier('gbraid');
+            $this->gbraidMemoized = true;
+        }
+
+        return $this->memoizedGbraid;
+    }
+
+    /**
+     * The WBRAID for the current visitor, or null if none can be found.
+     */
+    public function wbraid(): ?string
+    {
+        if (! $this->wbraidMemoized) {
+            $this->memoizedWbraid = $this->resolveIdentifier('wbraid');
+            $this->wbraidMemoized = true;
+        }
+
+        return $this->memoizedWbraid;
+    }
+
+    /**
+     * Any resolved click identifier (gclid ?? gbraid ?? wbraid).
+     */
+    public function clickId(): ?string
+    {
+        return $this->gclid() ?? $this->gbraid() ?? $this->wbraid();
+    }
+
+    /**
+     * Discard memoized click identifiers. Useful in tests and long-running workers.
      */
     public function forgetGclid(): void
     {
         $this->memoizedGclid = null;
+        $this->memoizedGbraid = null;
+        $this->memoizedWbraid = null;
         $this->gclidMemoized = false;
+        $this->gbraidMemoized = false;
+        $this->wbraidMemoized = false;
     }
 
     /**
      * Record a conversion event for the current visitor.
      *
-     * Either $value or a per-event config default may supply the value;
-     * the call-site argument always wins. If neither is set, the
-     * conversion is uploaded without a value.
+     * @param  string  $eventName  Internal event name or Google Ads action name
+     * @param  float|null  $value  Monetary conversion value
+     * @param  string|null  $currency  ISO 4217 currency code (e.g. 'USD', 'EUR')
+     * @param  string|null  $gclid  Optional direct GCLID override
+     * @param  string|null  $gbraid  Optional direct GBRAID override
+     * @param  string|null  $wbraid  Optional direct WBRAID override
+     * @param  string|null  $orderId  Optional unique order / transaction ID for deduplication
+     * @param  DateTimeInterface|int|string|null  $conversionDateTime  Optional conversion timestamp
+     * @param  array{ad_user_data?: string|bool|null, ad_personalization?: string|bool|null}|bool|null  $consent
+     * @param  array{email?: string|null, phone?: string|null, phone_number?: string|null}  $userIdentifiers
      */
     public function record(
         string $eventName,
         ?float $value = null,
         ?string $currency = null,
         ?string $gclid = null,
+        ?string $gbraid = null,
+        ?string $wbraid = null,
+        ?string $orderId = null,
+        DateTimeInterface|int|string|null $conversionDateTime = null,
+        array|bool|null $consent = null,
+        array $userIdentifiers = [],
     ): void {
-        $gclid = $gclid ?? $this->gclid();
+        $resolvedClickId = $gclid ?? $gbraid ?? $wbraid ?? $this->clickId();
 
-        if (! $gclid) {
-            Log::warning("[GoogleAdsConversions] Failed to record '{$eventName}': no GCLID found in override, session, cookie, or visitor history.");
+        if (! $resolvedClickId) {
+            Log::warning("[GoogleAdsConversions] Failed to record '{$eventName}': no GCLID, GBRAID, or WBRAID found in override, session, cookie, or visitor history.");
 
             return;
         }
@@ -88,33 +150,67 @@ class GoogleAdsConversions
         $resolvedValue = $this->events->value($eventName, $value);
         $resolvedCurrency = $this->events->currency($eventName, $currency);
 
-        $this->pushToCache($gclid, [
+        $timestamp = match (true) {
+            $conversionDateTime instanceof DateTimeInterface => $conversionDateTime->getTimestamp(),
+            is_numeric($conversionDateTime) => (int) $conversionDateTime,
+            is_string($conversionDateTime) => Carbon::parse($conversionDateTime)->getTimestamp(),
+            default => now()->timestamp,
+        };
+
+        $conversionEntry = [
             'event' => $eventName,
-            'timestamp' => now()->timestamp,
+            'timestamp' => $timestamp,
             'value' => $resolvedValue,
             'currency' => $resolvedCurrency,
             'status' => 'pending',
-        ]);
+        ];
+
+        if ($gclid) {
+            $conversionEntry['gclid'] = $gclid;
+        }
+        if ($gbraid) {
+            $conversionEntry['gbraid'] = $gbraid;
+        }
+        if ($wbraid) {
+            $conversionEntry['wbraid'] = $wbraid;
+        }
+        if ($orderId !== null) {
+            $conversionEntry['order_id'] = $orderId;
+        }
+
+        if ($consent !== null) {
+            $conversionEntry['consent'] = is_array($consent)
+                ? $consent
+                : ['ad_user_data' => $consent, 'ad_personalization' => $consent];
+        }
+
+        if (! empty($userIdentifiers) && config('google-ads-conversions.enhanced_conversions.enabled', false)) {
+            $conversionEntry['user_identifiers'] = $userIdentifiers;
+        }
+
+        $this->pushToCache($resolvedClickId, $conversionEntry);
+
+        ConversionRecorded::dispatch($resolvedClickId, $conversionEntry);
     }
 
     /**
      * Buffer creation/update data for a lead in cache, to be flushed
      * to the database by the next syncToDatabase() run.
      */
-    public function bufferLeadData(string $gclid, array $data): void
+    public function bufferLeadData(string $clickId, array $data): void
     {
         Cache::put(
-            self::LEAD_DATA_PREFIX.$gclid,
+            self::LEAD_DATA_PREFIX.$clickId,
             $data,
             now()->addDays(self::BUFFER_TTL_DAYS),
         );
 
-        $this->markDirty($gclid);
+        $this->markDirty($clickId);
     }
 
     /**
      * Flush the cache buffer to the database, creating or updating
-     * one model per dirty gclid.
+     * one model per dirty click identifier.
      */
     public function syncToDatabase(): void
     {
@@ -125,19 +221,35 @@ class GoogleAdsConversions
         }
 
         $modelClass = $this->modelClass();
+        $synced = [];
 
-        foreach ($dirty as $gclid) {
-            $leadData = Cache::pull(self::LEAD_DATA_PREFIX.$gclid);
+        foreach ($dirty as $clickId) {
+            $leadData = Cache::pull(self::LEAD_DATA_PREFIX.$clickId);
 
-            /** @var HasConversions $lead */
-            $lead = $modelClass::query()->where('gclid', $gclid)->first()
-                ?? new $modelClass(['gclid' => $gclid]);
+            /** @var HasConversions&Model $lead */
+            $lead = $modelClass::query()
+                ->where('gclid', $clickId)
+                ->orWhere('gbraid', $clickId)
+                ->orWhere('wbraid', $clickId)
+                ->first();
+
+            if (! $lead) {
+                $lead = new $modelClass;
+                // Identify default column to assign clickId
+                if (isset($leadData['gbraid'])) {
+                    $lead->setGbraid($clickId);
+                } elseif (isset($leadData['wbraid'])) {
+                    $lead->setWbraid($clickId);
+                } else {
+                    $lead->setGclid($clickId);
+                }
+            }
 
             if ($leadData) {
                 $lead->fillTrackingData($leadData);
             }
 
-            $cached = Cache::pull(self::CACHE_PREFIX.$gclid);
+            $cached = Cache::pull(self::CACHE_PREFIX.$clickId);
 
             if (! empty($cached)) {
                 $existing = $lead->getConversions();
@@ -145,7 +257,8 @@ class GoogleAdsConversions
                 foreach ($cached as $entry) {
                     $duplicate = $existing->contains(
                         fn ($item) => ($item['event'] ?? null) === $entry['event']
-                            && ($item['timestamp'] ?? null) === $entry['timestamp'],
+                            && ($item['timestamp'] ?? null) === $entry['timestamp']
+                            && ($item['order_id'] ?? null) === ($entry['order_id'] ?? null),
                     );
 
                     if (! $duplicate) {
@@ -159,52 +272,84 @@ class GoogleAdsConversions
             if ($lead->isModified()) {
                 $lead->persist();
             }
+
+            $synced[] = $clickId;
         }
 
-        Cache::forget(self::DIRTY_SET_KEY);
+        // Clean up dirty set safely
+        $currentDirty = Cache::get(self::DIRTY_SET_KEY, []);
+        if (is_array($currentDirty)) {
+            $remaining = array_values(array_diff($currentDirty, $synced));
+            if (empty($remaining)) {
+                Cache::forget(self::DIRTY_SET_KEY);
+            } else {
+                Cache::put(self::DIRTY_SET_KEY, $remaining, now()->addDays(self::BUFFER_TTL_DAYS));
+            }
+        }
 
-        Log::info('[GoogleAdsConversions] Synced '.count($dirty).' leads/conversions to database.');
+        Log::info('[GoogleAdsConversions] Synced '.count($synced).' leads/conversions to database.');
+
+        ConversionsSynced::dispatch($synced);
     }
 
     /**
-     * Find a GCLID for the current request, in priority order:
-     *   1. Session     (set by the middleware on the landing request)
-     *   2. Cookie      (persists across sessions, set by the middleware)
-     *   3. Visitor ID  (look up the most recent lead with this visitor's UUID)
+     * GDPR Right to Erasure: Permanently delete all leads for a given visitor ID.
      */
-    protected function resolveGclid(): ?string
+    public function forgetVisitor(string $visitorId): int
     {
-        $sessionKey = config('google-ads-conversions.session_key', 'google_ads_gclid');
-        $gclidCookie = config('google-ads-conversions.cookies.gclid', 'google_ads_gclid');
-        $visitorCookie = config('google-ads-conversions.cookies.visitor_id', 'google_ads_visitor_id');
+        return (int) $this->modelClass()::query()
+            ->where('visitor_id', $visitorId)
+            ->delete();
+    }
 
-        if ($gclid = Session::get($sessionKey)) {
-            return $gclid;
+    /**
+     * Find a click identifier for the current request.
+     */
+    protected function resolveIdentifier(string $type): ?string
+    {
+        $sessionKeys = (array) config('google-ads-conversions.session_keys', [
+            'gclid' => 'google_ads_gclid',
+            'gbraid' => 'google_ads_gbraid',
+            'wbraid' => 'google_ads_wbraid',
+        ]);
+        $cookieConfig = (array) config('google-ads-conversions.cookies');
+
+        $sessionKey = $sessionKeys[$type] ?? config('google-ads-conversions.session_key', 'google_ads_gclid');
+        $cookieKey = $cookieConfig[$type] ?? 'google_ads_'.$type;
+        $visitorCookie = $cookieConfig['visitor_id'] ?? 'google_ads_visitor_id';
+
+        if ($val = Session::get($sessionKey)) {
+            return $val;
         }
 
         $request = request();
 
-        if ($gclid = $request->cookie($gclidCookie)) {
-            return $gclid;
+        if ($val = $request->cookie($cookieKey)) {
+            return $val;
         }
 
         if ($visitorId = $request->cookie($visitorCookie)) {
             $lead = $this->modelClass()::query()
                 ->where('visitor_id', $visitorId)
+                ->whereNotNull($type)
                 ->latest()
                 ->first();
 
             if ($lead instanceof HasConversions) {
-                return $lead->getGclid();
+                return match ($type) {
+                    'gbraid' => $lead->getGbraid(),
+                    'wbraid' => $lead->getWbraid(),
+                    default => $lead->getGclid(),
+                };
             }
         }
 
         return null;
     }
 
-    protected function pushToCache(string $gclid, array $conversion): void
+    protected function pushToCache(string $clickId, array $conversion): void
     {
-        $key = self::CACHE_PREFIX.$gclid;
+        $key = self::CACHE_PREFIX.$clickId;
         $pending = Cache::get($key, []);
 
         if (! is_array($pending)) {
@@ -215,12 +360,12 @@ class GoogleAdsConversions
 
         Cache::put($key, $pending, now()->addDays(self::BUFFER_TTL_DAYS));
 
-        $this->markDirty($gclid);
+        $this->markDirty($clickId);
 
-        Log::info("[GoogleAdsConversions] Cached conversion '{$conversion['event']}' for GCLID '{$gclid}'");
+        Log::info("[GoogleAdsConversions] Cached conversion '{$conversion['event']}' for click ID '{$clickId}'");
     }
 
-    protected function markDirty(string $gclid): void
+    protected function markDirty(string $clickId): void
     {
         $dirty = Cache::get(self::DIRTY_SET_KEY, []);
 
@@ -228,8 +373,8 @@ class GoogleAdsConversions
             $dirty = [];
         }
 
-        if (! in_array($gclid, $dirty, true)) {
-            $dirty[] = $gclid;
+        if (! in_array($clickId, $dirty, true)) {
+            $dirty[] = $clickId;
             Cache::put(self::DIRTY_SET_KEY, $dirty, now()->addDays(self::BUFFER_TTL_DAYS));
         }
     }
