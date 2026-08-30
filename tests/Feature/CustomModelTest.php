@@ -2,7 +2,9 @@
 
 use ElectricTomCat\GoogleAdsConversions\Contracts\HasConversions;
 use ElectricTomCat\GoogleAdsConversions\GoogleAdsConversions;
+use ElectricTomCat\GoogleAdsConversions\Models\Concerns\HasConversionsTrait;
 use ElectricTomCat\GoogleAdsConversions\Tests\Fixtures\CustomLead;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
@@ -12,7 +14,9 @@ beforeEach(function () {
     Schema::dropIfExists('custom_leads');
     Schema::create('custom_leads', function (Blueprint $table) {
         $table->id();
-        $table->string('gclid')->unique()->index();
+        $table->string('gclid')->nullable()->unique();
+        $table->string('gbraid')->nullable()->index();
+        $table->string('wbraid')->nullable()->index();
         $table->uuid('visitor_id')->nullable()->index();
         $table->json('conversions')->nullable();
         $table->string('utm_source')->nullable();
@@ -48,7 +52,22 @@ it('confirms the trait gives bring-your-own models the full contract', function 
     $lead = new CustomLead;
 
     expect(method_exists($lead, 'getGclid'))->toBeTrue()
+        ->and(method_exists($lead, 'getGbraid'))->toBeTrue()
+        ->and(method_exists($lead, 'getWbraid'))->toBeTrue()
         ->and(method_exists($lead, 'setConversions'))->toBeTrue()
         ->and(method_exists($lead, 'fillTrackingData'))->toBeTrue()
         ->and(method_exists($lead, 'persist'))->toBeTrue();
+});
+
+it('fills tracking data correctly even when custom model uses guarded = []', function () {
+    $guardedModel = new class extends Model implements HasConversions
+    {
+        use HasConversionsTrait;
+
+        protected $guarded = [];
+    };
+
+    $guardedModel->fillTrackingData(['utm_source' => 'google_cpc']);
+
+    expect($guardedModel->utm_source)->toBe('google_cpc');
 });

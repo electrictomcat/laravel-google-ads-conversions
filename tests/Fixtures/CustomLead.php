@@ -15,6 +15,8 @@ class CustomLead extends Model implements HasConversions
 
     protected $fillable = [
         'gclid',
+        'gbraid',
+        'wbraid',
         'visitor_id',
         'conversions',
         'utm_source',

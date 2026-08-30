@@ -4,13 +4,18 @@ namespace ElectricTomCat\GoogleAdsConversions\Models;
 
 use ElectricTomCat\GoogleAdsConversions\Contracts\HasConversions;
 use ElectricTomCat\GoogleAdsConversions\Models\Concerns\HasConversionsTrait;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\AsCollection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Prunable;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
 /**
  * @property int $id
- * @property string $gclid
+ * @property string|null $gclid
+ * @property string|null $gbraid
+ * @property string|null $wbraid
  * @property string|null $visitor_id
  * @property Collection|null $conversions
  * @property string|null $landing_page
@@ -22,13 +27,17 @@ use Illuminate\Support\Collection;
  * @property string|null $utm_term
  * @property string|null $gad_source
  * @property string|null $gad_campaignid
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
  */
 class Lead extends Model implements HasConversions
 {
-    use HasConversionsTrait;
+    use HasConversionsTrait, Prunable;
 
     protected $fillable = [
         'gclid',
+        'gbraid',
+        'wbraid',
         'visitor_id',
         'conversions',
         'landing_page',
@@ -49,5 +58,15 @@ class Lead extends Model implements HasConversions
     public function getTable()
     {
         return config('google-ads-conversions.table', parent::getTable());
+    }
+
+    /**
+     * Get the prunable model query for GDPR data retention.
+     */
+    public function prunable(): Builder
+    {
+        $retentionDays = (int) config('google-ads-conversions.privacy.retention_days', 90);
+
+        return static::where('created_at', '<=', now()->subDays($retentionDays));
     }
 }

@@ -13,6 +13,7 @@ beforeEach(function () {
         'Page Navigation' => 'Page Navigation Action',
     ]);
     config()->set('google-ads-conversions.default_currency', 'USD');
+    config()->set('google-ads-conversions.allow_unmapped_events', false);
 
     $this->resolver = new EventResolver;
 });
@@ -25,8 +26,14 @@ it('resolves an array event to its action name', function () {
     expect($this->resolver->action('Demo Booked'))->toBe('Demo Booked Action');
 });
 
-it('returns null for an unmapped event', function () {
+it('returns null for an unmapped event when allow_unmapped_events is false', function () {
     expect($this->resolver->action('Unknown Event'))->toBeNull();
+});
+
+it('returns the event name for unmapped events when allow_unmapped_events is true', function () {
+    config()->set('google-ads-conversions.allow_unmapped_events', true);
+
+    expect($this->resolver->action('Direct Action Name'))->toBe('Direct Action Name');
 });
 
 it('matches by prefix for "Prefix: ..." events', function () {
