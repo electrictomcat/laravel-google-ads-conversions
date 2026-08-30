@@ -25,7 +25,7 @@
     <div class="fixed inset-0 radial-zen pointer-events-none -z-10"></div>
 
     <!-- Navigation -->
-    <header class="sticky top-0 z-50 backdrop-blur-md bg-[#090D16]/80 border-b border-slate-800/60">
+    <header class="sticky top-0 z-50 backdrop-blur-md bg-[#090D16]/90 border-b border-slate-800/80">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
             <a href="/" class="flex items-center space-x-3 group">
                 <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500/20 via-cyan-500/20 to-indigo-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-xl group-hover:border-emerald-400/60 transition shadow-lg">
@@ -40,22 +40,49 @@
                 </div>
             </a>
 
+            <!-- Desktop Nav -->
             <nav class="hidden md:flex items-center space-x-8 text-sm font-medium text-slate-300">
-                <a href="#features" class="hover:text-emerald-400 transition">Channels</a>
+                <a href="#channels" class="hover:text-emerald-400 transition">Channels</a>
+                <a href="#features" class="hover:text-emerald-400 transition">Features</a>
                 <a href="#calculator" class="hover:text-emerald-400 transition">ROAS Calculator</a>
                 <a href="#privacy" class="hover:text-emerald-400 transition">Privacy Nirvana</a>
                 <a href="#pricing" class="hover:text-emerald-400 transition">Pricing</a>
-                <a href="/ad-conversions" class="hover:text-emerald-400 transition flex items-center gap-1.5 text-slate-400">
+                <a href="/docs" class="hover:text-emerald-400 transition flex items-center gap-1">
+                    <span>Docs</span>
+                    <span class="text-[10px] uppercase font-mono px-1 py-0.2 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">KB</span>
+                </a>
+                <a href="/dashboard" class="hover:text-emerald-400 transition flex items-center gap-1.5 text-slate-400">
                     <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                     Live Dashboard
                 </a>
             </nav>
 
-            <div class="flex items-center space-x-4">
+            <div class="hidden md:flex items-center space-x-4">
                 <a href="#pricing" class="rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-5 py-2.5 text-sm font-bold shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 transition transform active:scale-95">
                     Attain Nirvana →
                 </a>
             </div>
+
+            <!-- Mobile Menu Toggle Button -->
+            <div class="md:hidden flex items-center">
+                <button id="mobile-menu-btn" type="button" class="text-slate-400 hover:text-white focus:outline-none p-2" aria-label="Toggle Menu">
+                    <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Mobile Dropdown Menu -->
+        <div id="mobile-menu" class="hidden md:hidden px-4 pt-2 pb-6 space-y-3 bg-[#090D16]/95 border-b border-slate-800">
+            <a href="#channels" class="block text-slate-300 hover:text-emerald-400 py-1 text-sm font-medium">Channels</a>
+            <a href="#features" class="block text-slate-300 hover:text-emerald-400 py-1 text-sm font-medium">Features</a>
+            <a href="#calculator" class="block text-slate-300 hover:text-emerald-400 py-1 text-sm font-medium">ROAS Calculator</a>
+            <a href="#privacy" class="block text-slate-300 hover:text-emerald-400 py-1 text-sm font-medium">Privacy Nirvana</a>
+            <a href="#pricing" class="block text-slate-300 hover:text-emerald-400 py-1 text-sm font-medium">Pricing</a>
+            <a href="/docs" class="block text-slate-300 hover:text-cyan-400 py-1 text-sm font-medium">Documentation & KB</a>
+            <a href="/dashboard" class="block text-emerald-400 py-1 text-sm font-medium">Live Dashboard</a>
+            <a href="#pricing" class="block text-center mt-2 rounded-xl bg-emerald-500 text-slate-950 py-2.5 text-sm font-bold">Attain Nirvana →</a>
         </div>
     </header>
 
@@ -87,8 +114,11 @@
                         <span>Get OmniSignal Pro</span>
                         <span>→</span>
                     </a>
-                    <a href="/ad-conversions" class="w-full sm:w-auto rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-white px-7 py-4 text-base font-semibold shadow-sm transition flex items-center justify-center gap-2">
-                        <span>Preview Local Dashboard</span>
+                    <a href="/docs" class="w-full sm:w-auto rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-white px-7 py-4 text-base font-semibold shadow-sm transition flex items-center justify-center gap-2">
+                        <span>📖 Read Documentation</span>
+                    </a>
+                    <a href="/dashboard" class="w-full sm:w-auto rounded-xl bg-slate-900/60 hover:bg-slate-800 border border-slate-800 text-slate-300 px-6 py-4 text-base font-semibold shadow-sm transition flex items-center justify-center gap-2">
+                        <span>Live Dashboard</span>
                     </a>
                 </div>
 
@@ -118,34 +148,82 @@
             </div>
         </section>
 
-        <!-- Channel Logos Marquee -->
-        <section class="py-10 border-y border-slate-800/60 bg-[#080c15]">
+        <!-- Channel Logos Section -->
+        <section id="channels" class="py-12 border-y border-slate-800/60 bg-[#080c15] scroll-mt-20">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <p class="text-center text-xs uppercase tracking-widest text-slate-500 font-semibold mb-6">
+                <p class="text-center text-xs uppercase tracking-widest text-slate-500 font-semibold mb-8">
                     Harmonious Multi-Channel Signal Delivery
                 </p>
                 <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-6 text-center">
-                    <div class="p-3 rounded-xl bg-slate-900/40 border border-slate-800 text-sm font-semibold text-slate-300 flex items-center justify-center gap-2">
-                        <span class="text-emerald-400 font-bold">G</span> Google Ads & Consent v2
+                    <a href="/docs#google-ads" class="p-4 rounded-xl bg-slate-900/50 hover:bg-slate-900 border border-slate-800 hover:border-emerald-500/40 text-sm font-semibold text-slate-300 flex items-center justify-center gap-2 transition">
+                        <span class="text-emerald-400 font-bold text-base">G</span> Google Ads & Consent v2
+                    </a>
+                    <a href="/docs#meta-capi" class="p-4 rounded-xl bg-slate-900/50 hover:bg-slate-900 border border-slate-800 hover:border-blue-500/40 text-sm font-semibold text-slate-300 flex items-center justify-center gap-2 transition">
+                        <span class="text-blue-400 font-bold text-base">∞</span> Meta CAPI (v20.0)
+                    </a>
+                    <a href="/docs#linkedin" class="p-4 rounded-xl bg-slate-900/50 hover:bg-slate-900 border border-slate-800 hover:border-cyan-500/40 text-sm font-semibold text-slate-300 flex items-center justify-center gap-2 transition">
+                        <span class="text-cyan-400 font-bold text-base">in</span> LinkedIn Conversions API
+                    </a>
+                    <a href="/docs#tiktok" class="p-4 rounded-xl bg-slate-900/50 hover:bg-slate-900 border border-slate-800 hover:border-rose-500/40 text-sm font-semibold text-slate-300 flex items-center justify-center gap-2 transition">
+                        <span class="text-rose-400 font-bold text-base">♪</span> TikTok Events API
+                    </a>
+                    <a href="/docs#microsoft" class="p-4 rounded-xl bg-slate-900/50 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/40 text-sm font-semibold text-slate-300 flex items-center justify-center gap-2 transition">
+                        <span class="text-amber-400 font-bold text-base">⊞</span> Microsoft Ads (Bing)
+                    </a>
+                </div>
+            </div>
+        </section>
+
+        <!-- Features & Architecture Section -->
+        <section id="features" class="py-24 scroll-mt-20 relative">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center max-w-3xl mx-auto mb-16">
+                    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-xs font-semibold text-emerald-400 mb-3 border border-emerald-500/20">
+                        <span>Zen Architecture</span>
                     </div>
-                    <div class="p-3 rounded-xl bg-slate-900/40 border border-slate-800 text-sm font-semibold text-slate-300 flex items-center justify-center gap-2">
-                        <span class="text-blue-400 font-bold">∞</span> Meta CAPI (v20.0)
+                    <h2 class="text-3xl sm:text-4xl font-extrabold text-white">Engineered for High-Throughput Nirvana</h2>
+                    <p class="mt-4 text-slate-400 text-base">Decouples conversion recording from external API latency while ensuring 100% attribution reliability.</p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <!-- Feature 1 -->
+                    <div class="p-8 rounded-3xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition">
+                        <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center text-xl font-bold mb-6">
+                            ⚡
+                        </div>
+                        <h3 class="text-lg font-bold text-white">Zero DB Lag (Cache Buffering)</h3>
+                        <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+                            Middleware intercepts click IDs and buffers tracking data in Redis/Cache instantly with zero database query overhead on initial visitor page loads.
+                        </p>
                     </div>
-                    <div class="p-3 rounded-xl bg-slate-900/40 border border-slate-800 text-sm font-semibold text-slate-300 flex items-center justify-center gap-2">
-                        <span class="text-cyan-400 font-bold">in</span> LinkedIn Conversions API
+
+                    <!-- Feature 2 -->
+                    <div class="p-8 rounded-3xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition">
+                        <div class="w-12 h-12 rounded-2xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center text-xl font-bold mb-6">
+                            🛡️
+                        </div>
+                        <h3 class="text-lg font-bold text-white">Cross-Lead Batching (2,000/req)</h3>
+                        <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+                            Queued workers aggregate pending conversions across multiple customers into high-density batch API requests, minimizing HTTP connections and API rate limits.
+                        </p>
                     </div>
-                    <div class="p-3 rounded-xl bg-slate-900/40 border border-slate-800 text-sm font-semibold text-slate-300 flex items-center justify-center gap-2">
-                        <span class="text-rose-400 font-bold">♪</span> TikTok Events API
-                    </div>
-                    <div class="p-3 rounded-xl bg-slate-900/40 border border-slate-800 text-sm font-semibold text-slate-300 flex items-center justify-center gap-2">
-                        <span class="text-amber-400 font-bold">⊞</span> Microsoft Ads (Bing)
+
+                    <!-- Feature 3 -->
+                    <div class="p-8 rounded-3xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition">
+                        <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center text-xl font-bold mb-6">
+                            🧪
+                        </div>
+                        <h3 class="text-lg font-bold text-white">First-Class Testing Fake</h3>
+                        <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+                            Test booking controllers, payment observers, and Livewire components effortlessly using <code class="text-indigo-300 font-mono">OmniSignal::fake()</code> and expressive assertion helpers.
+                        </p>
                     </div>
                 </div>
             </div>
         </section>
 
         <!-- Interactive ROAS & Signal Recovery Calculator -->
-        <section id="calculator" class="py-24 relative">
+        <section id="calculator" class="py-24 relative bg-[#080d16] border-y border-slate-800/80 scroll-mt-20">
             <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
                     <h2 class="text-3xl sm:text-4xl font-extrabold text-white">How much lost ad revenue will you recover?</h2>
@@ -200,8 +278,44 @@
             </div>
         </section>
 
+        <!-- Privacy Nirvana Section -->
+        <section id="privacy" class="py-24 scroll-mt-20 relative">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center max-w-3xl mx-auto mb-16">
+                    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 text-xs font-semibold text-indigo-400 mb-3 border border-indigo-500/20">
+                        <span>🇪🇺 GDPR & ePrivacy Ready</span>
+                    </div>
+                    <h2 class="text-3xl sm:text-4xl font-extrabold text-white">Privacy Nirvana: Strict Data Minimization</h2>
+                    <p class="mt-4 text-slate-400 text-base">Designed for strict European and UK compliance standards without sacrificing conversion match rates.</p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <div class="p-8 rounded-3xl bg-slate-900/60 border border-slate-800">
+                        <h3 class="text-lg font-bold text-white">Prior-Consent Cookie Gating</h3>
+                        <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+                            Automatically inspects request cookies for consent from Cookiebot, OneTrust, or custom callbacks before setting persistent 30-day marketing cookies.
+                        </p>
+                    </div>
+
+                    <div class="p-8 rounded-3xl bg-slate-900/60 border border-slate-800">
+                        <h3 class="text-lg font-bold text-white">Google Consent Mode v2</h3>
+                        <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+                            Explicitly attaches <code class="text-indigo-300 font-mono">ad_user_data</code> and <code class="text-indigo-300 font-mono">ad_personalization</code> signals to satisfy the Digital Markets Act (DMA).
+                        </p>
+                    </div>
+
+                    <div class="p-8 rounded-3xl bg-slate-900/60 border border-slate-800">
+                        <h3 class="text-lg font-bold text-white">90-Day Auto-Pruning & Erasure</h3>
+                        <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+                            Implements Laravel's <code class="text-indigo-300 font-mono">Prunable</code> trait to automatically discard stale leads, and provides <code class="text-indigo-300 font-mono">forgetVisitor()</code> for Right to Erasure requests.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- Pricing Section -->
-        <section id="pricing" class="py-24 border-t border-slate-800/80 bg-[#080d16]">
+        <section id="pricing" class="py-24 border-t border-slate-800/80 bg-[#080d16] scroll-mt-20">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
                 <h2 class="text-3xl sm:text-4xl font-extrabold text-white">Serene, transparent pricing.</h2>
                 <p class="mt-3 text-slate-400 max-w-xl mx-auto">One investment. Infinite attribution peace of mind. Sold via LemonSqueezy with instant Composer access.</p>
@@ -289,12 +403,19 @@
                 <span class="font-bold text-slate-300">OmniSignal</span>
                 <span>&bull; Pure Signal. Zero Noise.</span>
             </div>
+            <div class="flex items-center space-x-6">
+                <a href="/docs" class="hover:text-slate-300 transition">Documentation</a>
+                <a href="/dashboard" class="hover:text-slate-300 transition">Dashboard</a>
+                <a href="#pricing" class="hover:text-slate-300 transition">Pricing</a>
+                <a href="https://github.com/electrictomcat/omnisignal" target="_blank" class="hover:text-slate-300 transition">GitHub</a>
+            </div>
             <p>&copy; 2026 OmniSignal (<a href="https://omnisignal.dev" class="text-slate-400 hover:underline">omnisignal.dev</a>). All rights reserved.</p>
         </div>
     </footer>
 
-    <!-- Interactive Calculator JS -->
+    <!-- Interactive Scripts -->
     <script>
+        // Calculator
         const range = document.getElementById('spend-range');
         const spendDisplay = document.getElementById('spend-display');
         const recoveredDisplay = document.getElementById('recovered-display');
@@ -304,6 +425,13 @@
             spendDisplay.textContent = '$' + spend.toLocaleString() + ' / mo';
             const recovered = Math.round(spend * 0.35);
             recoveredDisplay.textContent = '$' + recovered.toLocaleString() + ' / mo';
+        });
+
+        // Mobile Menu Toggle
+        const menuBtn = document.getElementById('mobile-menu-btn');
+        const mobileMenu = document.getElementById('mobile-menu');
+        menuBtn.addEventListener('click', () => {
+            mobileMenu.classList.toggle('hidden');
         });
     </script>
 </body>
