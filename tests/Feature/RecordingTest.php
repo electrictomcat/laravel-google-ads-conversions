@@ -19,7 +19,7 @@ it('records a conversion in the cache buffer', function () {
         ->and($cached[0]['currency'])->toBe('USD')
         ->and($cached[0]['status'])->toBe('pending');
 
-    expect(Cache::get(GoogleAdsConversions::DIRTY_SET_KEY))->toContain($gclid);
+    expect(app(GoogleAdsConversions::class)->pendingClickIds())->toContain($gclid);
 });
 
 it('flushes cached conversions to the database on sync', function () {
@@ -43,7 +43,7 @@ it('flushes cached conversions to the database on sync', function () {
         ->and($lead->getConversions()->first()['event'])->toBe('Quote Form');
 
     expect(Cache::has(GoogleAdsConversions::CACHE_PREFIX.$gclid))->toBeFalse()
-        ->and(Cache::get(GoogleAdsConversions::DIRTY_SET_KEY, []))->not->toContain($gclid);
+        ->and(app(GoogleAdsConversions::class)->pendingClickIds())->not->toContain($gclid);
 });
 
 it('uses the per-event config default value when call site omits one', function () {
@@ -77,7 +77,7 @@ it('lets the call site override the config default value', function () {
 it('does not record when no GCLID is available', function () {
     app(GoogleAdsConversions::class)->record('Quote Form', 100.0);
 
-    expect(Cache::get(GoogleAdsConversions::DIRTY_SET_KEY, []))->toBeEmpty();
+    expect(app(GoogleAdsConversions::class)->pendingClickIds())->toBeEmpty();
 });
 
 it('deduplicates conversions on sync', function () {

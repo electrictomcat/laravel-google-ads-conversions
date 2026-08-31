@@ -23,7 +23,7 @@ it('buffers gclid + tracking data in cache, not in the database', function () {
         ->assertOk();
 
     expect(Lead::where('gclid', $gclid)->exists())->toBeFalse();
-    expect(Cache::get(GoogleAdsConversions::DIRTY_SET_KEY))->toContain($gclid);
+    expect(app(GoogleAdsConversions::class)->pendingClickIds())->toContain($gclid);
 
     $buffered = Cache::get(GoogleAdsConversions::LEAD_DATA_PREFIX.$gclid);
 
@@ -49,11 +49,11 @@ it('persists buffered data into the database after sync', function () {
 it('also captures gbraid as a gclid alternative', function () {
     $this->get('/landing?gbraid=test-gbraid');
 
-    expect(Cache::get(GoogleAdsConversions::DIRTY_SET_KEY))->toContain('test-gbraid');
+    expect(app(GoogleAdsConversions::class)->pendingClickIds())->toContain('test-gbraid');
 });
 
 it('does not buffer when no click ID is on the URL', function () {
     $this->get('/landing?utm_source=organic');
 
-    expect(Cache::get(GoogleAdsConversions::DIRTY_SET_KEY, []))->toBeEmpty();
+    expect(app(GoogleAdsConversions::class)->pendingClickIds())->toBeEmpty();
 });
