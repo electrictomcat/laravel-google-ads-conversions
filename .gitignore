@@ -30,3 +30,6 @@ phpstan.neon
 testbench.yaml
 /docs
 /coverage
+
+# Stray runtime artifact from a local tool
+/data
