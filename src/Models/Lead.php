@@ -17,7 +17,7 @@ use Illuminate\Support\Collection;
  * @property string|null $gbraid
  * @property string|null $wbraid
  * @property string|null $visitor_id
- * @property Collection|null $conversions
+ * @property Collection<int, array<string, mixed>>|null $conversions
  * @property string|null $landing_page
  * @property string|null $source
  * @property string|null $utm_source
@@ -62,11 +62,36 @@ class Lead extends Model implements HasConversions
 
     /**
      * Get the prunable model query for GDPR data retention.
+     *
+     * Rows still holding an undelivered conversion are held back: retention and
+     * delivery run on separate clocks, and pruning on age alone would delete a
+     * conversion that had simply not been uploaded yet. Anything held back this
+     * way is logged so a stuck queue can't quietly defer retention forever.
+     */
+    /**
+     * @return Builder<self>
      */
     public function prunable(): Builder
     {
         $retentionDays = (int) config('google-ads-conversions.privacy.retention_days', 90);
 
-        return static::where('created_at', '<=', now()->subDays($retentionDays));
+        $query = static::where('created_at', '<=', now()->subDays($retentionDays));
+
+        if (! (bool) config('google-ads-conversions.privacy.prune_pending', false)) {
+            $column = $this->getConnection()->getQueryGrammar()->wrap($this->getTable().'.conversions');
+
+            // Postgres needs an explicit cast before a json/jsonb column can be
+            // pattern-matched; MySQL and SQLite store it as text already.
+            if ($this->getConnection()->getDriverName() === 'pgsql') {
+                $column .= '::text';
+            }
+
+            $query->where(function (Builder $q) use ($column) {
+                $q->whereNull('conversions')
+                    ->orWhereRaw("{$column} NOT LIKE ?", ['%"status":"pending"%']);
+            });
+        }
+
+        return $query;
     }
 }

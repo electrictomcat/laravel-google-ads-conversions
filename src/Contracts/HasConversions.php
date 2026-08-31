@@ -22,10 +22,19 @@ interface HasConversions
 
     public function setVisitorId(?string $visitorId): void;
 
+    /**
+     * @return Collection<int, array<string, mixed>>
+     */
     public function getConversions(): Collection;
 
+    /**
+     * @param  Collection<int, array<string, mixed>>|array<int, array<string, mixed>>  $conversions
+     */
     public function setConversions(Collection|array $conversions): void;
 
+    /**
+     * @param  array<string, mixed>  $data
+     */
     public function fillTrackingData(array $data): void;
 
     public function persist(): bool;

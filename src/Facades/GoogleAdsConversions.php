@@ -7,13 +7,14 @@ use ElectricTomCat\GoogleAdsConversions\Testing\GoogleAdsConversionsFake;
 use Illuminate\Support\Facades\Facade;
 
 /**
- * @method static void record(string $eventName, ?float $value = null, ?string $currency = null, ?string $gclid = null, ?string $gbraid = null, ?string $wbraid = null, ?string $orderId = null, DateTimeInterface|int|string|null $conversionDateTime = null, array|bool|null $consent = null, array $userIdentifiers = [])
+ * @method static bool record(string $eventName, ?float $value = null, ?string $currency = null, ?string $gclid = null, ?string $gbraid = null, ?string $wbraid = null, ?string $orderId = null, DateTimeInterface|int|string|null $conversionDateTime = null, array{ad_user_data?: string|bool|null, ad_personalization?: string|bool|null}|bool|null $consent = null, array<string, mixed> $userIdentifiers = [])
  * @method static string|null gclid()
  * @method static string|null gbraid()
  * @method static string|null wbraid()
  * @method static string|null clickId()
  * @method static void forgetGclid()
- * @method static void bufferLeadData(string $clickId, array $data)
+ * @method static void bufferLeadData(string $clickId, array<string, mixed> $data)
+ * @method static array<int, string> pendingClickIds()
  * @method static void syncToDatabase()
  * @method static int forgetVisitor(string $visitorId)
  * @method static void assertRecorded(string|\Closure $eventName, ?float $value = null)

@@ -3,6 +3,7 @@
 namespace ElectricTomCat\GoogleAdsConversions;
 
 use ElectricTomCat\GoogleAdsConversions\Contracts\HasConversions;
+use ElectricTomCat\GoogleAdsConversions\DTO\ConversionPayload;
 use ElectricTomCat\GoogleAdsConversions\Events\ConversionsUploaded;
 use ElectricTomCat\GoogleAdsConversions\Events\ConversionUploadFailed;
 use ElectricTomCat\GoogleAdsConversions\Models\Lead;
@@ -12,6 +13,7 @@ use ElectricTomCat\GoogleAdsConversions\Support\UserDataHasher;
 use Google\Ads\GoogleAds\Lib\OAuth2TokenBuilder;
 use Google\Ads\GoogleAds\Lib\V23\GoogleAdsClient;
 use Google\Ads\GoogleAds\Lib\V23\GoogleAdsClientBuilder;
+use Google\Ads\GoogleAds\V23\Errors\GoogleAdsFailure;
 use Google\Ads\GoogleAds\V23\Services\ClickConversion;
 use Google\Ads\GoogleAds\V23\Services\SearchGoogleAdsRequest;
 use Google\Ads\GoogleAds\V23\Services\UploadClickConversionsRequest;
@@ -26,11 +28,22 @@ use Illuminate\Support\Facades\Log;
  */
 class ConversionUploader
 {
+    protected ?GoogleAdsClient $client = null;
+
     public function __construct(
         protected EventResolver $events,
         protected ConsentManager $consentManager,
         protected UserDataHasher $hasher,
     ) {}
+
+    /**
+     * Drop the memoized API client. Useful in tests and long-running workers
+     * where credentials may be swapped between runs.
+     */
+    public function forgetClient(): void
+    {
+        $this->client = null;
+    }
 
     /**
      * Find every lead with at least one pending conversion older than
@@ -53,8 +66,9 @@ class ConversionUploader
         $modelClass::query()
             ->whereNotNull('conversions')
             ->chunkById(100, function ($leads) use (&$batchItems, &$totalUploaded, $threshold, $batchSize, $validateOnly) {
-                /** @var HasConversions&Model $lead */
                 foreach ($leads as $lead) {
+                    // A custom model may not implement the contract; skip
+                    // rather than fatal halfway through a sweep.
                     if (! $lead instanceof HasConversions) {
                         continue;
                     }
@@ -88,6 +102,19 @@ class ConversionUploader
 
                         $click = $this->buildClickConversion($lead, $conversion, $resourceName);
 
+                        // Google needs either a click identifier or hashed user
+                        // identifiers. Sending a conversion with neither is a
+                        // guaranteed rejection, so skip it here rather than
+                        // burning a slot in the batch.
+                        if (! $this->isAttributable($click)) {
+                            Log::warning(
+                                "[GoogleAdsConversions] Skipping '{$conversion['event']}': no click identifier and "
+                                .'no user identifiers to attribute it with.'
+                            );
+
+                            continue;
+                        }
+
                         $batchItems[] = [
                             'lead' => $lead,
                             'index' => $index,
@@ -108,6 +135,126 @@ class ConversionUploader
         }
 
         return $totalUploaded;
+    }
+
+    /**
+     * Upload a specific set of payloads, without touching the pending queue.
+     *
+     * Used by the driver interface, where the caller has already decided which
+     * conversions to send.
+     *
+     * @param  array<int, ConversionPayload>  $payloads
+     * @return array{count: int, errors: array<int, string>}
+     */
+    public function uploadPayloads(array $payloads, bool $validateOnly = false): array
+    {
+        $clicks = [];
+        $errors = [];
+
+        foreach ($payloads as $payload) {
+            $action = $this->events->action($payload->eventName);
+
+            if (! $action) {
+                $errors[] = "No conversion action mapped for event: {$payload->eventName}";
+
+                continue;
+            }
+
+            $resourceName = $this->resolveActionResourceName($action);
+
+            if (! $resourceName) {
+                $errors[] = "Could not resolve resource name for action: {$action}";
+
+                continue;
+            }
+
+            $click = $this->buildClickConversionFromPayload($payload, $resourceName);
+
+            if (! $this->isAttributable($click)) {
+                $errors[] = "Conversion '{$payload->eventName}' has no click identifier and no user identifiers.";
+
+                continue;
+            }
+
+            $clicks[] = $click;
+        }
+
+        if ($clicks === []) {
+            return ['count' => 0, 'errors' => $errors];
+        }
+
+        try {
+            $service = $this->client()->getConversionUploadServiceClient();
+
+            $request = UploadClickConversionsRequest::build($this->customerId(), $clicks, true);
+
+            if ($validateOnly) {
+                $request->setValidateOnly(true);
+            }
+
+            /** @var UploadClickConversionsResponse $response */
+            $response = $service->uploadClickConversions($request);
+
+            $rejected = $response->hasPartialFailureError()
+                ? $this->rejectedIndexes($response, count($clicks))
+                : [];
+
+            foreach ($rejected as $message) {
+                $errors[] = $message;
+            }
+
+            return ['count' => count($clicks) - count($rejected), 'errors' => $errors];
+        } catch (\Throwable $e) {
+            Log::error('[GoogleAdsConversions] Payload upload error: '.$e->getMessage());
+            $errors[] = $e->getMessage();
+
+            return ['count' => 0, 'errors' => $errors];
+        }
+    }
+
+    /**
+     * Make one cheap authenticated call to confirm the credentials work.
+     *
+     * @return array{success: bool, message: string, descriptive_name: ?string, currency: ?string, time_zone: ?string}
+     */
+    public function probeAccount(): array
+    {
+        try {
+            $service = $this->client()->getGoogleAdsServiceClient();
+
+            $query = 'SELECT customer.descriptive_name, customer.currency_code, customer.time_zone '
+                   .'FROM customer LIMIT 1';
+
+            $response = $service->search(SearchGoogleAdsRequest::build($this->customerId(), $query));
+
+            foreach ($response->iterateAllElements() as $row) {
+                $customer = $row->getCustomer();
+
+                return [
+                    'success' => true,
+                    'message' => 'OK',
+                    'descriptive_name' => $customer?->getDescriptiveName(),
+                    'currency' => $customer?->getCurrencyCode(),
+                    'time_zone' => $customer?->getTimeZone(),
+                ];
+            }
+
+            return [
+                'success' => false,
+                'message' => 'Authenticated, but the account returned no rows.',
+                'descriptive_name' => null,
+                'currency' => null,
+                'time_zone' => null,
+            ];
+        } catch (\Throwable $e) {
+            return [
+                'success' => false,
+                'message' => $e->getMessage(),
+                'descriptive_name' => null,
+                'currency' => null,
+                'time_zone' => null,
+            ];
+        }
     }
 
     /**
@@ -158,13 +305,39 @@ class ConversionUploader
                 ? $response->getPartialFailureError()->getMessage()
                 : null;
 
+            $rejected = $hasPartialFailure
+                ? $this->rejectedIndexes($response, count($clicks))
+                : [];
+
             if ($hasPartialFailure) {
-                Log::error('[GoogleAdsConversions] Partial failure in batch upload: '.$partialFailureMessage);
+                Log::error(
+                    '[GoogleAdsConversions] Partial failure in batch upload ('.count($rejected).' of '
+                    .count($clicks).' rejected): '.$partialFailureMessage
+                );
+            }
+
+            // A validate-only run must not touch stored state. Marking these
+            // 'uploaded' would retire conversions Google never actually
+            // recorded, so the documented dry run would silently destroy the
+            // pending queue.
+            if ($isValidateOnly) {
+                $accepted = count($clicks) - count($rejected);
+                Log::info("[GoogleAdsConversions] Validated {$accepted} conversion(s) (validate_only; nothing persisted).");
+
+                foreach ($rejected as $i => $reason) {
+                    $item = $batchItems[$i] ?? null;
+                    if ($item) {
+                        ConversionUploadFailed::dispatch($this->clickIdFor($item['lead']), $reason, $item['conversion']);
+                    }
+                }
+
+                return $accepted;
             }
 
             // Group conversions back by lead model to persist status updates in single transactions
             $leadsMap = [];
             $uploadedClickIds = [];
+            $uploaded = 0;
 
             foreach ($batchItems as $i => $item) {
                 /** @var HasConversions&Model $lead */
@@ -179,16 +352,26 @@ class ConversionUploader
                     ];
                 }
 
-                $clickId = $lead->getGclid() ?? $lead->getGbraid() ?? $lead->getWbraid() ?? 'unknown';
+                $clickId = $this->clickIdFor($lead);
 
-                // In validate-only mode or successful request
-                $leadsMap[$leadId]['conversions'][$index]['status'] = 'uploaded';
-                $leadsMap[$leadId]['conversions'][$index]['uploaded_at'] = now()->timestamp;
-                if ($isValidateOnly) {
-                    $leadsMap[$leadId]['conversions'][$index]['validate_only'] = true;
+                if (array_key_exists($i, $rejected)) {
+                    // Google refused this row. Leave it pending so the next run
+                    // retries it, and record why on the entry so the dashboard
+                    // and the failure event can surface it.
+                    $leadsMap[$leadId]['conversions'][$index]['status'] = 'failed';
+                    $leadsMap[$leadId]['conversions'][$index]['failed_at'] = now()->timestamp;
+                    $leadsMap[$leadId]['conversions'][$index]['error'] = $rejected[$i];
+
+                    ConversionUploadFailed::dispatch($clickId, $rejected[$i], $item['conversion']);
+
+                    continue;
                 }
 
+                $leadsMap[$leadId]['conversions'][$index]['status'] = 'uploaded';
+                $leadsMap[$leadId]['conversions'][$index]['uploaded_at'] = now()->timestamp;
+
                 $uploadedClickIds[] = $clickId;
+                $uploaded++;
             }
 
             foreach ($leadsMap as $entry) {
@@ -198,12 +381,13 @@ class ConversionUploader
                 $lead->persist();
             }
 
-            $count = count($clicks);
-            Log::info("[GoogleAdsConversions] Successfully processed {$count} conversions".($isValidateOnly ? ' (validate_only)' : ''));
+            Log::info("[GoogleAdsConversions] Successfully uploaded {$uploaded} conversion(s).");
 
-            ConversionsUploaded::dispatch($count, array_unique($uploadedClickIds));
+            if ($uploaded > 0) {
+                ConversionsUploaded::dispatch($uploaded, array_unique($uploadedClickIds));
+            }
 
-            return $count;
+            return $uploaded;
         } catch (\Throwable $e) {
             Log::error('[GoogleAdsConversions] Batch API upload error: '.$e->getMessage());
 
@@ -214,6 +398,115 @@ class ConversionUploader
 
             return 0;
         }
+    }
+
+    /**
+     * Map a partial-failure response to the batch indexes Google rejected.
+     *
+     * `partial_failure_error` carries a GoogleAdsFailure whose errors each
+     * point at the operation index that produced them. Without unpacking it,
+     * a rejected conversion is indistinguishable from an accepted one.
+     *
+     * @return array<int, string> index => error message
+     */
+    protected function rejectedIndexes(UploadClickConversionsResponse $response, int $batchSize): array
+    {
+        $rejected = [];
+
+        try {
+            $status = $response->getPartialFailureError();
+
+            foreach ($status->getDetails() as $detail) {
+                $failure = new GoogleAdsFailure;
+                $failure->mergeFromString($detail->getValue());
+
+                foreach ($failure->getErrors() as $error) {
+                    $message = $error->getMessage();
+                    $matched = false;
+
+                    foreach ($error->getLocation()?->getFieldPathElements() ?? [] as $element) {
+                        if ($element->getFieldName() === 'operations') {
+                            $rejected[(int) $element->getIndex()] = $message;
+                            $matched = true;
+                        }
+                    }
+
+                    if (! $matched) {
+                        Log::error('[GoogleAdsConversions] Unattributed partial-failure error: '.$message);
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            // If the failure detail cannot be decoded we cannot tell which rows
+            // Google kept. Treating the whole batch as failed is the safe
+            // reading: those conversions stay pending and are retried, rather
+            // than being retired on an assumption.
+            Log::error('[GoogleAdsConversions] Could not decode partial failure detail: '.$e->getMessage());
+
+            return array_fill(0, $batchSize, 'Undecodable partial failure; conversion left pending for retry.');
+        }
+
+        return $rejected;
+    }
+
+    /**
+     * Build a ClickConversion from a standalone payload (driver interface).
+     */
+    protected function buildClickConversionFromPayload(ConversionPayload $payload, string $resourceName): ClickConversion
+    {
+        $click = new ClickConversion([
+            'conversion_action' => $resourceName,
+            'conversion_date_time' => date('Y-m-d H:i:sP', $payload->timestamp),
+            'currency_code' => $payload->currency ?? config('google-ads-conversions.default_currency', 'USD'),
+        ]);
+
+        if ($payload->gbraid) {
+            $click->setGbraid($payload->gbraid);
+        } elseif ($payload->wbraid) {
+            $click->setWbraid($payload->wbraid);
+        } elseif ($payload->gclid) {
+            $click->setGclid($payload->gclid);
+        }
+
+        if ($payload->value !== null) {
+            $click->setConversionValue((float) $payload->value);
+        }
+
+        if ($payload->orderId !== null) {
+            $click->setOrderId((string) $payload->orderId);
+        }
+
+        $consent = $this->consentManager->resolveConsentObject(
+            is_array($payload->consent) ? $payload->consent : null
+        );
+        if ($consent !== null) {
+            $click->setConsent($consent);
+        }
+
+        if (! empty($payload->userData) && config('google-ads-conversions.enhanced_conversions.enabled', false)) {
+            $identifiers = $this->hasher->hashUserIdentifiers($payload->userData);
+            if (! empty($identifiers)) {
+                $click->setUserIdentifiers($identifiers);
+            }
+        }
+
+        return $click;
+    }
+
+    protected function clickIdFor(HasConversions $lead): string
+    {
+        return $lead->getGclid() ?? $lead->getGbraid() ?? $lead->getWbraid() ?? 'unknown';
+    }
+
+    /**
+     * Whether Google has anything to match this conversion against.
+     */
+    protected function isAttributable(ClickConversion $click): bool
+    {
+        return $click->getGclid() !== ''
+            || $click->getGbraid() !== ''
+            || $click->getWbraid() !== ''
+            || $click->getUserIdentifiers()->count() > 0;
     }
 
     /**
@@ -289,7 +582,10 @@ class ConversionUploader
             $client = $this->client();
             $service = $client->getGoogleAdsServiceClient();
 
-            $escapedAction = str_replace("'", "\\'", $action);
+            // Backslash first, then the quote — escaping the quote first would
+            // leave a trailing backslash able to escape its own escape and
+            // break out of the literal.
+            $escapedAction = str_replace(['\\', "'"], ['\\\\', "\\'"], $action);
             $query = 'SELECT conversion_action.resource_name '
                    .'FROM conversion_action '
                    ."WHERE conversion_action.name = '{$escapedAction}'";
@@ -311,7 +607,19 @@ class ConversionUploader
         return null;
     }
 
+    /**
+     * The Google Ads client for this instance.
+     *
+     * Memoized because a batch run resolves one conversion action per distinct
+     * event and then uploads, and each of those previously rebuilt the OAuth
+     * credential and the whole client from scratch.
+     */
     protected function client(): GoogleAdsClient
+    {
+        return $this->client ??= $this->buildClient();
+    }
+
+    protected function buildClient(): GoogleAdsClient
     {
         $oauth = (new OAuth2TokenBuilder)
             ->withClientId(config('google-ads-conversions.client_id'))
