@@ -59,7 +59,10 @@ return [
 
     'microsoft' => [
         'developer_token' => env('MICROSOFT_ADS_DEVELOPER_TOKEN'),
+        // The manager (customer) ID and the ad account ID are different
+        // things; ApplyOfflineConversions requires both.
         'customer_id' => env('MICROSOFT_ADS_CUSTOMER_ID'),
+        'account_id' => env('MICROSOFT_ADS_ACCOUNT_ID'),
         'access_token' => env('MICROSOFT_ADS_ACCESS_TOKEN'),
     ],
 
@@ -72,6 +75,9 @@ return [
     'linkedin' => [
         'access_token' => env('LINKEDIN_ACCESS_TOKEN'),
         'conversion_rule_id' => env('LINKEDIN_CONVERSION_RULE_ID'),
+        // LinkedIn retires a version roughly a year after release; when calls
+        // start returning 426, roll this forward.
+        'version' => env('LINKEDIN_API_VERSION', '202608'),
     ],
 
     /*
@@ -95,9 +101,12 @@ return [
     */
 
     'dashboard' => [
-        'enabled' => (bool) env('AD_CONVERSIONS_DASHBOARD_ENABLED', true),
-        'path' => 'ad-conversions',
-        'middleware' => ['web'],
+        // Off by default, and behind auth when switched on. The dashboard
+        // exposes lead counts, click identifiers and attributed revenue, so it
+        // must never be reachable anonymously.
+        'enabled' => (bool) env('AD_CONVERSIONS_DASHBOARD_ENABLED', false),
+        'path' => env('AD_CONVERSIONS_DASHBOARD_PATH', 'ad-conversions'),
+        'middleware' => ['web', 'auth'],
     ],
 
     /*
@@ -190,6 +199,15 @@ return [
             'laravel_cookie_consent',
         ],
         'retention_days' => (int) env('GOOGLE_ADS_RETENTION_DAYS', 90),
+
+        // Prune leads even when they still hold an unsent conversion. Off by
+        // default: retention should not silently destroy undelivered data.
+        'prune_pending' => (bool) env('GOOGLE_ADS_PRUNE_PENDING', false),
+
+        // Country calling code assumed for phone numbers stored without one
+        // (e.g. '1' for the US, '44' for the UK). Without it, such numbers are
+        // dropped rather than hashed under a guessed country.
+        'default_calling_code' => env('GOOGLE_ADS_DEFAULT_CALLING_CODE'),
     ],
 
     /*
@@ -201,6 +219,11 @@ return [
     'consent' => [
         'ad_user_data' => env('GOOGLE_ADS_CONSENT_AD_USER_DATA', null),
         'ad_personalization' => env('GOOGLE_ADS_CONSENT_AD_PERSONALIZATION', null),
+
+        // How to read a consent value that matches neither the granted nor the
+        // denied vocabulary. 'denied' fails closed; 'unspecified' preserves the
+        // pre-v2 behaviour of letting Google decide.
+        'unknown_maps_to' => env('GOOGLE_ADS_CONSENT_UNKNOWN', 'denied'),
     ],
 
     /*

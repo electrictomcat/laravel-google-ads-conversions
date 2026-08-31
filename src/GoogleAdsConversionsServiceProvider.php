@@ -68,10 +68,12 @@ class GoogleAdsConversionsServiceProvider extends PackageServiceProvider
             $router->aliasMiddleware('capture-gclid', CaptureGclid::class);
         }
 
-        // Register Dashboard Route if enabled
-        if (config('google-ads-conversions.dashboard.enabled', true)) {
+        // The dashboard exposes lead counts, click identifiers and attributed
+        // revenue, so the fallbacks here are deliberately closed: an app whose
+        // published config predates this key must not have the route appear.
+        if (config('google-ads-conversions.dashboard.enabled', false)) {
             $path = config('google-ads-conversions.dashboard.path', 'ad-conversions');
-            $middleware = config('google-ads-conversions.dashboard.middleware', ['web']);
+            $middleware = config('google-ads-conversions.dashboard.middleware', ['web', 'auth']);
 
             Route::middleware($middleware)->group(function () use ($path) {
                 Route::get($path, DashboardController::class)->name('ad-conversions.dashboard');

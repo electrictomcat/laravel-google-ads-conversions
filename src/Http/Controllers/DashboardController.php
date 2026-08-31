@@ -32,6 +32,7 @@ class DashboardController extends Controller
         $recentConversions = [];
 
         foreach ($allLeadsWithConversions as $lead) {
+            /** @var HasConversions&Model $lead */
             $conversions = $lead->getConversions();
             $clickId = $lead->getGclid() ?? $lead->getGbraid() ?? $lead->getWbraid() ?? 'N/A';
 
@@ -63,8 +64,9 @@ class DashboardController extends Controller
             }
         }
 
-        // Sort recent conversions descending by timestamp
-        usort($recentConversions, fn ($a, $b) => ($b['timestamp'] ?? 0) <=> ($a['timestamp'] ?? 0));
+        // Sort recent conversions descending by timestamp. Every entry is
+        // built with a timestamp above, so no fallback is needed here.
+        usort($recentConversions, fn (array $a, array $b) => $b['timestamp'] <=> $a['timestamp']);
         $recentConversions = array_slice($recentConversions, 0, 25);
 
         // Match rate calculation
