@@ -62,11 +62,17 @@ trait HasConversionsTrait
         $this->visitor_id = $visitorId;
     }
 
+    /**
+     * @return Collection<int, array<string, mixed>>
+     */
     public function getConversions(): Collection
     {
         return $this->conversions ?? collect();
     }
 
+    /**
+     * @param  Collection<int, array<string, mixed>>|array<int, array<string, mixed>>  $conversions
+     */
     public function setConversions(Collection|array $conversions): void
     {
         $this->conversions = $conversions instanceof Collection
@@ -74,6 +80,9 @@ trait HasConversionsTrait
             : collect($conversions);
     }
 
+    /**
+     * @param  array<string, mixed>  $data
+     */
     public function fillTrackingData(array $data): void
     {
         $fillable = $this->getFillable();

@@ -7,9 +7,12 @@ use Illuminate\Console\Command;
 
 class SyncConversionsCommand extends Command
 {
-    protected $signature = 'google-ads:sync';
+    protected $signature = 'ad-conversions:sync';
 
     protected $description = 'Flush cached conversions and visitor tracking data into the database';
+
+    /** @var array<int, string> */
+    protected $aliases = ['google-ads:sync'];
 
     public function handle(GoogleAdsConversions $tracker): int
     {

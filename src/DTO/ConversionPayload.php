@@ -9,7 +9,10 @@ use Illuminate\Support\Carbon;
 class ConversionPayload
 {
     /**
-     * @param  array{email?: string|null, phone?: string|null, first_name?: string|null, last_name?: string|null, city?: string|null, state?: string|null, postal_code?: string|null, country?: string|null, client_ip?: string|null, client_user_agent?: string|null}  $userData
+     * @param  array<string, mixed>  $userData  First-party identifiers. Commonly email,
+     *                                          phone (or phone_number), first_name, last_name, city,
+     *                                          state, postal_code, country, client_ip,
+     *                                          client_user_agent, fbc, fbp.
      * @param  array{ad_user_data?: string|bool|null, ad_personalization?: string|bool|null}|bool|null  $consent
      * @param  array<string, mixed>  $customData
      */

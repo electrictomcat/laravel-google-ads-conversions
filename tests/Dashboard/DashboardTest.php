@@ -2,7 +2,7 @@
 
 use ElectricTomCat\GoogleAdsConversions\Models\Lead;
 
-it('renders the embedded analytics dashboard at configured route', function () {
+it('renders the embedded analytics dashboard when it is explicitly enabled', function () {
     Lead::create([
         'gclid' => 'gclid-dashboard-test',
         'conversions' => [[

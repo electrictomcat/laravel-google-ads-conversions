@@ -6,6 +6,7 @@ use Closure;
 use Google\Ads\GoogleAds\V23\Common\Consent;
 use Google\Ads\GoogleAds\V23\Enums\ConsentStatusEnum\ConsentStatus;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class ConsentManager
 {
@@ -97,6 +98,11 @@ class ConsentManager
 
     /**
      * Map string/boolean input to Google Ads ConsentStatus enum int.
+     *
+     * A value matching neither vocabulary is a configuration or integration
+     * mistake, not a signal. It maps to DENIED by default so an unreadable
+     * consent string fails closed — set `consent.unknown_maps_to` to
+     * 'unspecified' to restore the older, permissive behaviour.
      */
     public function mapToConsentStatus(string|bool $status): int
     {
@@ -109,8 +115,17 @@ class ConsentManager
         return match ($normalized) {
             'GRANTED', 'TRUE', '1', 'ALLOW', 'ACCEPTED' => ConsentStatus::GRANTED,
             'DENIED', 'FALSE', '0', 'REJECT', 'DISALLOW' => ConsentStatus::DENIED,
-            default => ConsentStatus::UNSPECIFIED,
+            default => $this->unknownConsentStatus($normalized),
         };
+    }
+
+    protected function unknownConsentStatus(string $original): int
+    {
+        Log::warning("[GoogleAdsConversions] Unrecognised consent value '{$original}'; treating it as configured fallback.");
+
+        return strtolower((string) config('google-ads-conversions.consent.unknown_maps_to', 'denied')) === 'unspecified'
+            ? ConsentStatus::UNSPECIFIED
+            : ConsentStatus::DENIED;
     }
 
     /**

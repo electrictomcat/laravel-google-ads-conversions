@@ -97,6 +97,9 @@ class GoogleAdsConversionsFake
         $this->fakeWbraid = null;
     }
 
+    /**
+     * @param  array<string, mixed>  $data
+     */
     public function bufferLeadData(string $clickId, array $data): void {}
 
     public function syncToDatabase(): void {}
