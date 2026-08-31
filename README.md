@@ -147,7 +147,10 @@ $submission = ContactSubmission::create([
     'gclid' => GoogleAdsConversions::gclid(),     // string|null
     'gbraid' => GoogleAdsConversions::gbraid(),   // string|null
     'wbraid' => GoogleAdsConversions::wbraid(),   // string|null
-    'click_id' => GoogleAdsConversions::clickId(), // any active click identifier
+    // Store the typed identifier, not clickId(). Google keeps gclid, gbraid
+    // and wbraid in separate fields and rejects a value filed under the wrong
+    // one — and clickId() cannot tell you which kind it returned.
+    'click_id' => (string) GoogleAdsConversions::clickIdentifier(), // "gclid:Cj0KCQ..." 
 ]);
 ```
 
@@ -404,6 +407,55 @@ Point the config at your model:
 // config/google-ads-conversions.php
 'model' => \App\Models\Customer::class,
 ```
+
+---
+
+## Diagnosing missing conversions
+
+When conversions are not appearing in Google Ads:
+
+```bash
+php artisan ad-conversions:diagnose
+```
+
+It reports what Google itself says about your uploads — pulled from its
+offline-conversion diagnostics, including a breakdown of what is being rejected
+and why — then checks your own data for the shapes Google refuses or that never
+get sent at all: leads with no click identifier, braid values filed as gclids,
+conversions already older than Google's 90-day window, and settings that quietly
+cost attribution.
+
+### Click identifiers
+
+`gclid`, `gbraid` and `wbraid` live in three separate fields, and Google rejects
+a value placed in the wrong one:
+
+> The imported gclid could not be decoded. Make sure you use the correct gclid
+> format. `at conversions[0].gclid`
+
+A gclid is long and begins `Cj`/`EAIaIQ`; a gbraid or wbraid is shorter and
+begins `0AAAAA`. If you keep the identifier on your own records, store a
+`ClickIdentifier` rather than the raw string so the type travels with it:
+
+```php
+use ElectricTomCat\GoogleAdsConversions\Support\ClickIdentifier;
+
+// on capture
+$submission->click_id = (string) GoogleAdsConversions::clickIdentifier();
+
+// on conversion — routed to the right field automatically
+GoogleAdsConversions::record('Quote Form', 250.0,
+    gclid: ClickIdentifier::fromString($submission->click_id),
+);
+```
+
+A value that reaches the gclid field but has a braid's shape is moved to the
+correct field and logged, rather than being sent somewhere Google will certainly
+refuse it. Set `click_identifiers.autocorrect` to `false` to disable that.
+
+Two further rules the package now enforces for you: a `gclid` is always
+preferred over a braid when a lead has both, and enhanced-conversion identifiers
+are omitted when the click is a braid — Google rejects that combination outright.
 
 ---
 

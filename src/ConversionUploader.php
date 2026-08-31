@@ -7,12 +7,14 @@ use ElectricTomCat\GoogleAdsConversions\DTO\ConversionPayload;
 use ElectricTomCat\GoogleAdsConversions\Events\ConversionsUploaded;
 use ElectricTomCat\GoogleAdsConversions\Events\ConversionUploadFailed;
 use ElectricTomCat\GoogleAdsConversions\Models\Lead;
+use ElectricTomCat\GoogleAdsConversions\Support\ClickIdentifier;
 use ElectricTomCat\GoogleAdsConversions\Support\ConsentManager;
 use ElectricTomCat\GoogleAdsConversions\Support\EventResolver;
 use ElectricTomCat\GoogleAdsConversions\Support\UserDataHasher;
 use Google\Ads\GoogleAds\Lib\OAuth2TokenBuilder;
 use Google\Ads\GoogleAds\Lib\V23\GoogleAdsClient;
 use Google\Ads\GoogleAds\Lib\V23\GoogleAdsClientBuilder;
+use Google\Ads\GoogleAds\V23\Enums\OfflineConversionDiagnosticStatusEnum\OfflineConversionDiagnosticStatus;
 use Google\Ads\GoogleAds\V23\Errors\GoogleAdsFailure;
 use Google\Ads\GoogleAds\V23\Services\ClickConversion;
 use Google\Ads\GoogleAds\V23\Services\SearchGoogleAdsRequest;
@@ -258,6 +260,102 @@ class ConversionUploader
     }
 
     /**
+     * What Google reports about the offline conversions we have uploaded.
+     *
+     * Google exposes an account-level health summary rather than a per-
+     * conversion outcome, so this answers "are our uploads landing" and "what
+     * is being rejected", not "did this specific order attribute".
+     *
+     * @return array{ok: bool, message: string, rows: array<int, array{status: string, successful_count: int, failed_count: int, last_upload: string|null, alerts: array<int, array{error: string, rate: float}>}>}
+     */
+    public function uploadDiagnostics(): array
+    {
+        try {
+            $service = $this->client()->getGoogleAdsServiceClient();
+
+            $query = 'SELECT '
+                .'offline_conversion_upload_client_summary.client, '
+                .'offline_conversion_upload_client_summary.status, '
+                .'offline_conversion_upload_client_summary.total_event_count, '
+                .'offline_conversion_upload_client_summary.successful_event_count, '
+                .'offline_conversion_upload_client_summary.pending_event_count, '
+                .'offline_conversion_upload_client_summary.last_upload_date_time, '
+                .'offline_conversion_upload_client_summary.alerts '
+                .'FROM offline_conversion_upload_client_summary';
+
+            $response = $service->search(SearchGoogleAdsRequest::build($this->customerId(), $query));
+
+            $rows = [];
+
+            foreach ($response->iterateAllElements() as $row) {
+                $summary = $row->getOfflineConversionUploadClientSummary();
+
+                if (! $summary) {
+                    continue;
+                }
+
+                $total = (int) $summary->getTotalEventCount();
+                $successful = (int) $summary->getSuccessfulEventCount();
+
+                $alerts = [];
+
+                foreach ($summary->getAlerts() as $alert) {
+                    $alerts[] = [
+                        'error' => $this->describeUploadError($alert),
+                        'rate' => (float) $alert->getErrorPercentage(),
+                    ];
+                }
+
+                $rows[] = [
+                    'status' => $this->describeStatus($summary->getStatus()),
+                    'successful_count' => $successful,
+                    'failed_count' => max(0, $total - $successful),
+                    'last_upload' => $summary->getLastUploadDateTime() ?: null,
+                    'alerts' => $alerts,
+                ];
+            }
+
+            return ['ok' => true, 'message' => 'OK', 'rows' => $rows];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'message' => $e->getMessage(), 'rows' => []];
+        }
+    }
+
+    /**
+     * The protobuf enums here vary by API version, so read them defensively -
+     * a diagnostic that fatals is worse than one that says "UNKNOWN".
+     */
+    protected function describeStatus(mixed $status): string
+    {
+        try {
+            if (is_int($status)) {
+                return (string) OfflineConversionDiagnosticStatus::name($status);
+            }
+
+            return (string) $status;
+        } catch (\Throwable) {
+            return 'UNKNOWN';
+        }
+    }
+
+    protected function describeUploadError(mixed $alert): string
+    {
+        try {
+            $error = $alert->getError();
+
+            foreach (['getCollectionSizeError', 'getConversionUploadError', 'getConversionAdjustmentUploadError'] as $accessor) {
+                if (method_exists($error, $accessor) && $error->{$accessor}() !== null) {
+                    return (string) $error->{$accessor}();
+                }
+            }
+
+            return (string) json_encode($error);
+        } catch (\Throwable) {
+            return 'UNKNOWN_ERROR';
+        }
+    }
+
+    /**
      * Process and upload an aggregate batch of conversions across leads.
      *
      * @param  array<int, array{lead: HasConversions&Model, index: int, conversion: array<string, mixed>, click: ClickConversion}>  $batchItems
@@ -460,13 +558,7 @@ class ConversionUploader
             'currency_code' => $payload->currency ?? config('google-ads-conversions.default_currency', 'USD'),
         ]);
 
-        if ($payload->gbraid) {
-            $click->setGbraid($payload->gbraid);
-        } elseif ($payload->wbraid) {
-            $click->setWbraid($payload->wbraid);
-        } elseif ($payload->gclid) {
-            $click->setGclid($payload->gclid);
-        }
+        $identifierType = $this->assignClickIdentifier($click, $payload->gclid, $payload->gbraid, $payload->wbraid);
 
         if ($payload->value !== null) {
             $click->setConversionValue((float) $payload->value);
@@ -483,14 +575,102 @@ class ConversionUploader
             $click->setConsent($consent);
         }
 
-        if (! empty($payload->userData) && config('google-ads-conversions.enhanced_conversions.enabled', false)) {
-            $identifiers = $this->hasher->hashUserIdentifiers($payload->userData);
-            if (! empty($identifiers)) {
-                $click->setUserIdentifiers($identifiers);
+        $this->attachUserIdentifiers($click, $payload->userData, $identifierType);
+
+        return $click;
+    }
+
+    /**
+     * Put the click identifier in the field Google expects.
+     *
+     * Two things go wrong here often enough to be worth handling explicitly.
+     *
+     * Precedence: a gclid identifies a single click and attributes precisely,
+     * while gbraid and wbraid are the coarser privacy-preserving fallbacks for
+     * iOS traffic. A lead can accumulate more than one - arriving on Search
+     * once and from an app campaign later - and the gclid must win. This used
+     * to prefer gbraid, quietly downgrading attribution for those visitors.
+     *
+     * Misfiling: an untyped accessor makes it easy to hand a gbraid to the
+     * gclid argument, and Google answers "The imported gclid could not be
+     * decoded". A braid-shaped value is therefore moved to the field it
+     * belongs in rather than being sent somewhere it is certain to be
+     * rejected. Set click_identifiers.autocorrect to false to send it as-is.
+     */
+    protected function assignClickIdentifier(
+        ClickConversion $click,
+        ?string $gclid,
+        ?string $gbraid,
+        ?string $wbraid,
+    ): ?string {
+        if ($gclid && ClickIdentifier::looksLikeBraid($gclid)) {
+            Log::warning(
+                "[GoogleAdsConversions] '{$gclid}' was supplied as a gclid but looks like a gbraid/wbraid. "
+                .'Google rejects these. Store a ClickIdentifier rather than clickId() so the type travels '
+                .'with the value.'
+            );
+
+            if (config('google-ads-conversions.click_identifiers.autocorrect', true)) {
+                $gbraid ??= $gclid;
+                $gclid = null;
             }
         }
 
-        return $click;
+        // gclid first: it is the most precise identifier Google accepts.
+        // Exactly one is ever set - historically Google rejected a
+        // ClickConversion carrying more than one.
+        if ($gclid) {
+            $click->setGclid($gclid);
+
+            return ClickIdentifier::GCLID;
+        }
+
+        if ($gbraid) {
+            $click->setGbraid($gbraid);
+
+            return ClickIdentifier::GBRAID;
+        }
+
+        if ($wbraid) {
+            $click->setWbraid($wbraid);
+
+            return ClickIdentifier::WBRAID;
+        }
+
+        return null;
+    }
+
+    /**
+     * Attach hashed identifiers for Enhanced Conversions for Leads.
+     *
+     * Google refuses these alongside a gbraid or wbraid - the combination
+     * returns VALUE_MUST_BE_UNSET and the whole row is rejected - so the
+     * identifiers are dropped rather than losing the conversion. The click
+     * identifier is the stronger signal of the two, and it is the one Google
+     * will actually attribute on.
+     *
+     * @param  array<string, mixed>  $userData
+     */
+    protected function attachUserIdentifiers(ClickConversion $click, array $userData, ?string $identifierType): void
+    {
+        if (empty($userData) || ! config('google-ads-conversions.enhanced_conversions.enabled', false)) {
+            return;
+        }
+
+        if (in_array($identifierType, [ClickIdentifier::GBRAID, ClickIdentifier::WBRAID], true)) {
+            Log::info(
+                '[GoogleAdsConversions] Enhanced-conversion identifiers omitted: Google does not accept them '
+                ."alongside a {$identifierType}. The {$identifierType} was sent on its own."
+            );
+
+            return;
+        }
+
+        $identifiers = $this->hasher->hashUserIdentifiers($userData);
+
+        if (! empty($identifiers)) {
+            $click->setUserIdentifiers($identifiers);
+        }
     }
 
     protected function clickIdFor(HasConversions $lead): string
@@ -522,18 +702,12 @@ class ConversionUploader
             'currency_code' => $conversion['currency'] ?? config('google-ads-conversions.default_currency', 'USD'),
         ]);
 
-        // Assign correct click identifier (gbraid / wbraid / gclid)
-        $gbraid = $conversion['gbraid'] ?? $lead->getGbraid();
-        $wbraid = $conversion['wbraid'] ?? $lead->getWbraid();
-        $gclid = $conversion['gclid'] ?? $lead->getGclid();
-
-        if ($gbraid) {
-            $click->setGbraid($gbraid);
-        } elseif ($wbraid) {
-            $click->setWbraid($wbraid);
-        } elseif ($gclid) {
-            $click->setGclid($gclid);
-        }
+        $identifierType = $this->assignClickIdentifier(
+            $click,
+            $conversion['gclid'] ?? $lead->getGclid(),
+            $conversion['gbraid'] ?? $lead->getGbraid(),
+            $conversion['wbraid'] ?? $lead->getWbraid(),
+        );
 
         if (isset($conversion['value'])) {
             $click->setConversionValue((float) $conversion['value']);
@@ -549,13 +723,7 @@ class ConversionUploader
             $click->setConsent($consent);
         }
 
-        // Attach Enhanced Conversions for Leads (hashed user identifiers) if enabled
-        if (! empty($conversion['user_identifiers']) && config('google-ads-conversions.enhanced_conversions.enabled', false)) {
-            $identifiers = $this->hasher->hashUserIdentifiers($conversion['user_identifiers']);
-            if (! empty($identifiers)) {
-                $click->setUserIdentifiers($identifiers);
-            }
-        }
+        $this->attachUserIdentifiers($click, $conversion['user_identifiers'] ?? [], $identifierType);
 
         return $click;
     }

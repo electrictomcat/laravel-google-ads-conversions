@@ -2,6 +2,7 @@
 
 namespace ElectricTomCat\GoogleAdsConversions;
 
+use ElectricTomCat\GoogleAdsConversions\Commands\DiagnoseCommand;
 use ElectricTomCat\GoogleAdsConversions\Commands\InstallCommand;
 use ElectricTomCat\GoogleAdsConversions\Commands\SyncConversionsCommand;
 use ElectricTomCat\GoogleAdsConversions\Commands\TestConnectionCommand;
@@ -31,6 +32,7 @@ class GoogleAdsConversionsServiceProvider extends PackageServiceProvider
                 UploadConversionsCommand::class,
                 SyncConversionsCommand::class,
                 TestConnectionCommand::class,
+                DiagnoseCommand::class,
             ]);
     }
 
