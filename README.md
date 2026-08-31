@@ -6,16 +6,18 @@
 [![Total Downloads](https://img.shields.io/packagist/dt/electrictomcat/laravel-google-ads-conversions.svg?style=flat-square)](https://packagist.org/packages/electrictomcat/laravel-google-ads-conversions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE.md)
 
-Production-ready, drop-in offline conversion tracking for Laravel apps using the Google Ads API.
+Production-ready, drop-in offline conversion tracking for Laravel apps. Google Ads is the primary, most-featured channel — click attribution, Enhanced Conversions, GDPR retention — and the same recorded conversion can optionally also fan out to Meta, Microsoft Advertising, LinkedIn and TikTok.
 
 - 🎯 **Full Click Attribution**: Captures `gclid` (Search/Display) as well as `gbraid` and `wbraid` (iOS 14.5+ ATT app/web clicks) and maintains attribution across visitor sessions.
 - ⚡ **One-Line Recording**: Record conversions from anywhere — controllers, Livewire, queued jobs, Eloquent observers.
-- 🇪🇺 **GDPR, ePrivacy & Consent Mode v2 Ready**: Prior-consent cookie gating, automated 90-day retention pruning via `Prunable`, and explicit Google Consent Mode signals (`ad_user_data`, `ad_personalization`).
+- 📡 **Multi-Channel Fan-Out**: Optionally broadcast the same conversion to Meta CAPI, Microsoft Advertising, LinkedIn Conversions API and TikTok Events API alongside Google Ads.
+- 🇪🇺 **GDPR, ePrivacy & Consent Mode v2 Ready**: Prior-consent cookie gating, automated retention pruning via `Prunable`, and explicit Google Consent Mode signals (`ad_user_data`, `ad_personalization`).
 - 🔒 **Privacy-First & Enhanced Conversions**: Strict data minimization by default. Optionally enable Enhanced Conversions for Leads (SHA-256 hashed email & phone).
 - 🧪 **First-Class Testing Support**: Built-in `GoogleAdsConversions::fake()` for easy test assertions in your application test suite.
-- 🚀 **High Performance & Safe Batching**: Buffers in cache, syncs to database, and uploads in batched requests of up to 2,000 conversions with memory-safe chunking.
+- 🚀 **High Performance & Safe Batching**: Buffers in cache behind a sharded, lock-guarded dirty set, syncs to database, and uploads in batched requests of up to 2,000 conversions with memory-safe chunking.
 - 📦 **Bring Your Own Model**: Use the included `Lead` model or drop `HasConversionsTrait` onto your existing `User`, `Visitor`, or `Order` models.
-- 🛠️ **Artisan Tooling**: Dedicated CLI commands for testing credentials, syncing cache, and running dry-run uploads.
+- 🛠️ **Artisan Tooling**: Dedicated CLI commands for installing, testing credentials against live APIs, syncing cache, and running dry-run uploads.
+- 📊 **Optional Dashboard**: An in-app reporting view, off by default and gated behind auth when enabled.
 
 Requires **PHP 8.3+** and **Laravel 11, 12, or 13**.
 
@@ -29,11 +31,14 @@ Requires **PHP 8.3+** and **Laravel 11, 12, or 13**.
   - [Accessing Click Identifiers](#accessing-click-identifiers)
   - [Blade Directives for HTML Forms](#blade-directives-for-html-forms)
   - [Mapping Conversion Events](#mapping-conversion-events)
+- [Multi-Channel Conversion Fan-Out](#multi-channel-conversion-fan-out)
 - [Testing In Your Application](#testing-in-your-application)
 - [European & UK Privacy (GDPR & Consent Mode v2)](#european--uk-privacy-gdpr--consent-mode-v2)
 - [Enhanced Conversions for Leads](#enhanced-conversions-for-leads)
 - [Bring Your Own Model](#bring-your-own-model)
 - [Artisan CLI Commands](#artisan-cli-commands)
+- [The Reporting Dashboard](#the-reporting-dashboard)
+- [Concurrency & Cache Store Requirements](#concurrency--cache-store-requirements)
 - [Laravel Domain Events](#laravel-domain-events)
 - [Upgrade Guide](#upgrade-guide)
 
@@ -45,7 +50,13 @@ Requires **PHP 8.3+** and **Laravel 11, 12, or 13**.
 composer require electrictomcat/laravel-google-ads-conversions
 ```
 
-Publish the config and migrations:
+Run the install command — it publishes the config and migration, then reports which channels have credentials configured:
+
+```bash
+php artisan ad-conversions:install
+```
+
+Or publish manually:
 
 ```bash
 php artisan vendor:publish --tag="laravel-google-ads-conversions-config"
@@ -53,7 +64,7 @@ php artisan vendor:publish --tag="laravel-google-ads-conversions-migrations"
 php artisan migrate
 ```
 
-Add your credentials to `.env` (see [Google's OAuth setup](https://developers.google.com/google-ads/api/docs/oauth/cloud-project)):
+Add your Google Ads credentials to `.env` (see [Google's OAuth setup](https://developers.google.com/google-ads/api/docs/oauth/cloud-project)):
 
 ```env
 GOOGLE_ADS_DEVELOPER_TOKEN=
@@ -85,6 +96,8 @@ use Illuminate\Support\Facades\Schedule;
 Schedule::job(new UploadPendingConversions)->hourly();
 ```
 
+The job flushes the cache buffer to the database and then uploads everything eligible to Google Ads. It is `ShouldBeUnique`: an overlapping run is skipped rather than reading the same pending rows twice, since Google only de-duplicates uploads that carry an order ID.
+
 ---
 
 ## Usage
@@ -100,9 +113,11 @@ use ElectricTomCat\GoogleAdsConversions\Facades\GoogleAdsConversions;
 GoogleAdsConversions::record('Quote Form', 100.0);
 ```
 
+`record()` returns `bool`. It returns `false` — and logs a warning — when the conversion could not be attributed to anything: no `gclid`/`gbraid`/`wbraid` (override, session, cookie, or stored visitor history) and, if Enhanced Conversions is enabled, no hashed user identifiers to fall back on either. Check the return value if losing a conversion silently would matter to you.
+
 #### Full Options:
 ```php
-GoogleAdsConversions::record(
+$recorded = GoogleAdsConversions::record(
     eventName: 'Deal Closed',
     value: 1500.00,                      // Optional: conversion value
     currency: 'EUR',                     // Optional: ISO currency (falls back to config)
@@ -134,6 +149,12 @@ $submission = ContactSubmission::create([
     'wbraid' => GoogleAdsConversions::wbraid(),   // string|null
     'click_id' => GoogleAdsConversions::clickId(), // any active click identifier
 ]);
+```
+
+`pendingClickIds()` returns every click identifier (and visitor key) currently buffered in cache, awaiting the next `syncToDatabase()` — useful for diagnostics or a custom monitoring check:
+
+```php
+$pending = app(GoogleAdsConversions::class)->pendingClickIds(); // array<int, string>
 ```
 
 ### Blade Directives for HTML Forms
@@ -180,6 +201,59 @@ In `config/google-ads-conversions.php`:
 
 ---
 
+## Multi-Channel Conversion Fan-Out
+
+Beyond the primary Google Ads pipeline, the package ships a driver-based `ConversionManager` that can send the same conversion to other ad networks via their server-to-server conversion APIs. This is separate from `record()` / the `leads` table — it works with a `ConversionPayload` DTO and talks to each network directly, without buffering or the pending-queue/retry machinery Google Ads gets.
+
+```php
+use ElectricTomCat\GoogleAdsConversions\ConversionManager;
+use ElectricTomCat\GoogleAdsConversions\DTO\ConversionPayload;
+
+$payload = ConversionPayload::fromArray([
+    'event' => 'Demo Booked',
+    'value' => 250.0,
+    'currency' => 'USD',
+    'gclid' => GoogleAdsConversions::gclid(),
+    'fbclid' => $request->cookie('meta_ads_fbclid'),
+    'user_data' => ['email' => 'customer@example.com'],
+])->withRequest($request); // fills client_ip, client_user_agent, event_source_url if missing
+
+/** @var ConversionManager $manager */
+$manager = app(ConversionManager::class);
+
+// Send to every enabled_channels driver that has credentials configured
+$results = $manager->fanOut($payload);
+
+// Or restrict to a subset
+$results = $manager->fanOut($payload, ['google', 'meta']);
+```
+
+`fanOut()` returns an array keyed by channel name, each entry shaped `array{success: bool, count: int, errors: array<int, string>, raw_response: mixed}`. A channel is silently skipped (absent from the result) if it isn't configured; a channel that throws is caught and reported as a failed result rather than aborting the others.
+
+`getConfiguredDrivers()` returns just the drivers that currently have credentials set, keyed by name — handy for building your own status UI.
+
+### Drivers and required config
+
+| Channel | Driver | Required config keys |
+| :--- | :--- | :--- |
+| `google` | `GoogleAdsDriver` | `developer_token`, `client_id`, `client_secret`, `refresh_token`, `customer_id` |
+| `meta` | `MetaCapiDriver` | `meta.pixel_id`, `meta.access_token` |
+| `microsoft` | `MicrosoftAdsDriver` | `microsoft.developer_token`, `microsoft.customer_id`, `microsoft.account_id`, `microsoft.access_token` |
+| `linkedin` | `LinkedInDriver` | `linkedin.access_token`, `linkedin.conversion_rule_id` |
+| `tiktok` | `TikTokDriver` | `tiktok.access_token`, `tiktok.pixel_code` |
+
+A driver's `isConfigured()` must return `true` for every key above to be non-empty before it participates in `fanOut()` or `getConfiguredDrivers()`. Which channels are attempted at all (subject to that check) is controlled by `enabled_channels` in the config file — trim it to the networks you actually use.
+
+Note that Microsoft Advertising needs both a manager `customer_id` and an ad `account_id` — they are different IDs and `ApplyOfflineConversions` rejects a request missing either.
+
+`linkedin.version` (`LINKEDIN_API_VERSION`, default `202608`) is the LinkedIn API version header. LinkedIn retires a version roughly a year after release; when calls start returning HTTP 426, roll this forward.
+
+### `ConversionPayload`
+
+`ConversionPayload` (`src/DTO/ConversionPayload.php`) is the channel-agnostic conversion representation each driver consumes. Build it with the constructor or `ConversionPayload::fromArray()` (accepts `event`/`event_name`, `value`, `currency`, `order_id`/`orderId`, `timestamp`, `gclid`, `gbraid`, `wbraid`, `fbclid`, `fbc`, `fbp`, `msclkid`, `ttclid`, `li_fat_id`/`liFatId`, `user_data`/`user`/`user_identifiers`, `consent`, `custom_data`, `action_source`, `event_source_url`/`landing_page`). `withRequest($request)` fills in `client_ip`, `client_user_agent` and `event_source_url` from the current request when they're not already set. `primaryClickId()` returns the first non-null click identifier across every supported network, in `gclid, gbraid, wbraid, fbclid, msclkid, ttclid, liFatId` order.
+
+---
+
 ## Testing In Your Application
 
 The package includes a full testing fake so you can easily write tests in your application:
@@ -206,6 +280,8 @@ public function test_booking_records_offline_conversion()
 }
 ```
 
+`fake()` swaps the facade for `GoogleAdsConversionsFake`, which records to an in-memory array instead of touching cache, the database, or Google — no `record()` call in the fake path makes an attribution decision or returns `false`.
+
 ---
 
 ## European & UK Privacy (GDPR & Consent Mode v2)
@@ -230,6 +306,16 @@ Under ePrivacy / GDPR, marketing cookies cannot be dropped before consent is gra
 
     // Auto-prune leads after 90 days (Google's max attribution window)
     'retention_days' => 90,
+
+    // Prune leads even when they still hold an unsent conversion. Off by
+    // default: retention should not silently destroy undelivered data — a
+    // row with a still-pending conversion is held back from pruning until
+    // it either uploads or fails, unless this is true.
+    'prune_pending' => false,
+
+    // Country calling code assumed for phone numbers stored without one
+    // (e.g. '1' for the US, '44' for the UK). See "Phone number handling" below.
+    'default_calling_code' => env('GOOGLE_ADS_DEFAULT_CALLING_CODE'),
 ],
 ```
 
@@ -248,15 +334,24 @@ Set default consent signals for uploaded conversions:
 'consent' => [
     'ad_user_data' => env('GOOGLE_ADS_CONSENT_AD_USER_DATA', null), // 'GRANTED' | 'DENIED' | null
     'ad_personalization' => env('GOOGLE_ADS_CONSENT_AD_PERSONALIZATION', null),
+
+    // How a consent value that matches neither the granted nor the denied
+    // vocabulary is read. 'denied' fails closed; 'unspecified' preserves the
+    // pre-v2 behaviour of letting Google decide.
+    'unknown_maps_to' => env('GOOGLE_ADS_CONSENT_UNKNOWN', 'denied'),
 ],
 ```
 
 ### 3. GDPR Data Retention & Right to Erasure
-1. **Automated Pruning**: The default `Lead` model implements Laravel's `Prunable` trait. Schedule `php artisan model:prune` to remove records older than `retention_days`.
-2. **Right to Erasure**: Erase a visitor's stored tracking records:
+1. **Automated Pruning**: The default `Lead` model implements Laravel's `Prunable` trait. Schedule `php artisan model:prune` to remove records older than `retention_days`. Rows that still carry a `pending` conversion are excluded unless `privacy.prune_pending` is `true`.
+2. **Right to Erasure**: Erase a visitor's stored tracking records — this also purges anything for that visitor still sitting in the cache buffer (both the lead-data buffer and the dirty-set entry), not just the database rows, so a queued `syncToDatabase()` run can't resurrect what you just erased:
    ```php
    GoogleAdsConversions::forgetVisitor($visitorId);
    ```
+
+### Phone number handling
+
+`UserDataHasher` normalizes identifiers before hashing so the hash actually matches something. Email addresses are lowercased and trimmed, and for `gmail.com`/`googlemail.com` the dot-insensitive local part and any `+tag` suffix are stripped, so `a.b+promo@gmail.com` and `ab@gmail.com` hash identically. Phone numbers are reduced to E.164: a number already starting with `+` is used as-is; a number with no country code is combined with `privacy.default_calling_code` if you've set one. **If no calling code is configured, a phone number without one is dropped (logged, not hashed) rather than guessed at** — a wrong-country hash matches nobody and looks identical to a successful match, which is worse than sending nothing.
 
 ---
 
@@ -316,11 +411,50 @@ Point the config at your model:
 
 | Command | Description |
 | :--- | :--- |
-| `php artisan google-ads:upload` | Flush cache and upload pending conversions. |
-| `php artisan google-ads:upload --dry-run` | Validate conversions with Google Ads API without recording them (`validate_only = true`). |
-| `php artisan google-ads:upload --force` | Force upload immediately, ignoring the delay window. |
-| `php artisan google-ads:sync` | Flush the cache buffer directly into the database. |
-| `php artisan google-ads:test-connection` | Test API credentials and verify conversion action resolution. |
+| `php artisan ad-conversions:install` | Publish config/migration and report which channels have credentials configured. `--channel=` limits the check to specific channels. |
+| `php artisan ad-conversions:upload` | Flush cache and upload pending conversions. |
+| `php artisan ad-conversions:upload --dry-run` | Validate conversions with Google Ads API without recording them (`validate_only = true`). Stored state is left untouched — nothing is marked `uploaded`, so the pending queue survives a dry run. |
+| `php artisan ad-conversions:upload --force` | Force upload immediately, ignoring the delay window. |
+| `php artisan ad-conversions:sync` | Flush the cache buffer directly into the database. |
+| `php artisan ad-conversions:test` | Make a real authenticated API call to every configured channel and report pass/fail per channel, then resolve every mapped Google Ads conversion action. `--channel=` limits the check to specific channels; `--skip-actions` skips the conversion-action resolution step. |
+
+The old names `google-ads:upload`, `google-ads:sync` and `google-ads:test-connection` still work as aliases of the commands above, but are deprecated — prefer the `ad-conversions:*` names in new scripts and schedules.
+
+Note that `ad-conversions:test` now makes live, authenticated calls against each network's API (it previously only echoed config values back). Running it exercises real credentials and, for Google Ads, a real read-only query — expect it to fail exactly like a production upload would if a token is invalid or expired.
+
+---
+
+## The Reporting Dashboard
+
+An optional read-only dashboard (lead counts, upload/pending/failed conversion breakdown, attributed value, per-channel configuration status, and the 25 most recent conversions) is available at a configurable route.
+
+**It is disabled by default.** The dashboard surfaces lead counts, click identifiers and attributed revenue — data that must never be reachable anonymously — so it does not register a route at all unless you opt in:
+
+```env
+AD_CONVERSIONS_DASHBOARD_ENABLED=true
+AD_CONVERSIONS_DASHBOARD_PATH=ad-conversions
+```
+
+```php
+// config/google-ads-conversions.php
+'dashboard' => [
+    'enabled' => env('AD_CONVERSIONS_DASHBOARD_ENABLED', false),
+    'path' => env('AD_CONVERSIONS_DASHBOARD_PATH', 'ad-conversions'),
+    'middleware' => ['web', 'auth'],
+],
+```
+
+When enabled, the route is registered with `['web', 'auth']` middleware by default — an authenticated user, not an anonymous visitor, can view it. If your app's auth guard needs a different stack (a specific guard, a role/permission gate, IP allow-listing), replace the `middleware` array accordingly; do not remove `auth` without putting an equivalent restriction in its place.
+
+---
+
+## Concurrency & Cache Store Requirements
+
+Every write to the cache buffer (pending conversions, buffered lead data, and the dirty-click-ID set) is a read-modify-write. When the configured cache store implements Laravel's `LockProvider` contract — **redis, memcached, database, and array** all do — these mutations take a short-lived lock (5s TTL, 3s wait) so two concurrent requests recording against the same click ID can't silently clobber one another's write.
+
+**The `file` cache driver has no lock primitive.** Without `LockProvider`, mutations are applied unguarded — correct for a single request at a time, but a real race under concurrent traffic can drop a buffered conversion. Use `file` only for local development or genuinely low-concurrency deployments; for anything else, use redis, memcached, database, or array as your `CACHE_STORE`.
+
+The dirty set that tracks which click IDs need flushing to the database is sharded across 16 buckets (keyed by `crc32($clickId) % 16`) rather than kept in one array, so a busy site doesn't serialize every buffered write through a single hot key. `GoogleAdsConversions::DIRTY_SET_KEY` is the pre-sharding, single-key format; nothing writes to it any more, but `syncToDatabase()` still drains it on each run so buffers left behind by an older release of this package aren't stranded after an upgrade.
 
 ---
 
@@ -332,6 +466,8 @@ Hook into the conversion pipeline for notifications or telemetry:
 - `ElectricTomCat\GoogleAdsConversions\Events\ConversionsSynced`
 - `ElectricTomCat\GoogleAdsConversions\Events\ConversionsUploaded`
 - `ElectricTomCat\GoogleAdsConversions\Events\ConversionUploadFailed`
+
+`ConversionUploadFailed` now also fires for a conversion Google rejects in a partial-failure response, not just for a hard exception. A rejected conversion is marked `failed` in the `conversions` column (with `failed_at` and an `error` message) and is retried on the next upload run rather than being silently marked `uploaded` — check this event, or the `error` key, if conversions seem to vanish without appearing in Google Ads.
 
 ---
 

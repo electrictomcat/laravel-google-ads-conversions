@@ -1,105 +1,140 @@
-# Upgrade Guide
+# Upgrading
 
-## Upgrading to v2.0 (GBRAID, WBRAID, GDPR & Consent Mode v2 Support)
+## From v0.x to v2.0
 
-Version 2.0 introduces native support for iOS app/web tracking (`gbraid`, `wbraid`), European/UK GDPR and ePrivacy consent controls, Google Consent Mode v2, Enhanced Conversions (hashed user identifiers), and batch performance improvements.
+Most of v2 is additive, but a few things changed behaviour deliberately — in
+several cases because the old behaviour lost conversions. Work through the
+checklist below; nothing here takes long.
 
----
+### 1. The dashboard is now off by default
 
-### 1. Database Schema Update
+`/ad-conversions` used to be registered publicly on the `web` group. If you were
+relying on it, switch it on explicitly:
 
-If you are using the default `leads` table, add the new `gbraid` and `wbraid` columns:
-
-```php
-use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
-
-return new class extends Migration
-{
-    public function up(): void
-    {
-        Schema::table(config('google-ads-conversions.table', 'leads'), function (Blueprint $table) {
-            $table->string('gbraid')->nullable()->index()->after('gclid');
-            $table->string('wbraid')->nullable()->index()->after('gbraid');
-            // gclid can now be nullable if a visitor arrives via gbraid or wbraid
-            $table->string('gclid')->nullable()->change();
-        });
-    }
-
-    public function down(): void
-    {
-        Schema::table(config('google-ads-conversions.table', 'leads'), function (Blueprint $table) {
-            $table->dropColumn(['gbraid', 'wbraid']);
-        });
-    }
-};
+```env
+AD_CONVERSIONS_DASHBOARD_ENABLED=true
 ```
 
----
+It now defaults to `['web', 'auth']` middleware. If your app has no `auth` route
+to redirect to, override `dashboard.middleware` in the published config — for
+example `['web', 'auth.basic']`.
 
-### 2. If You Use a Custom Model (Bring Your Own Model)
+> If you did **not** know this route existed, check whether it has been publicly
+> reachable on your site.
 
-#### If you use `HasConversionsTrait`:
-No breaking code changes are required! The trait already implements the new contract methods (`getGbraid()`, `setGbraid()`, `getWbraid()`, `setWbraid()`). 
+### 2. `--dry-run` no longer marks conversions as uploaded
 
-Simply ensure:
-1. Your database table has nullable `gbraid` and `wbraid` columns.
-2. If your model uses `$fillable`, add `'gbraid'` and `'wbraid'`:
-   ```php
-   protected $fillable = [
-       'gclid',
-       'gbraid',
-       'wbraid',
-       'visitor_id',
-       'conversions',
-       // ...
-   ];
-   ```
+Previously a dry run retired everything it validated, so those conversions were
+never really sent. If you have run `--dry-run` against production, look for
+conversions marked `uploaded` with a `validate_only` key and reset them to
+`pending` — they were never delivered:
 
-#### If you implement `HasConversions` manually:
-Add the four new methods to your model:
 ```php
-public function getGbraid(): ?string
-{
-    return $this->gbraid;
-}
+use App\Models\Lead; // or your configured model
 
-public function setGbraid(?string $gbraid): void
-{
-    $this->gbraid = $gbraid;
-}
+Lead::whereNotNull('conversions')->chunkById(100, function ($leads) {
+    foreach ($leads as $lead) {
+        $conversions = $lead->getConversions()->map(function (array $entry) {
+            if (! empty($entry['validate_only'])) {
+                $entry['status'] = 'pending';
+                unset($entry['validate_only'], $entry['uploaded_at']);
+            }
 
-public function getWbraid(): ?string
-{
-    return $this->wbraid;
-}
+            return $entry;
+        });
 
-public function setWbraid(?string $wbraid): void
-{
-    $this->wbraid = $wbraid;
+        $lead->setConversions($conversions);
+        $lead->save();
+    }
+});
+```
+
+### 3. Use a cache store that supports locks
+
+The conversion buffer is mutated under a lock now. Redis, Memcached, DynamoDB,
+the database store and the array store all provide one. The **file** driver does
+not: it still works, but concurrent requests can drop a click identifier, which
+is the bug this change exists to fix. If `CACHE_STORE=file`, move to `database`
+at minimum.
+
+### 4. Phone numbers need a country code
+
+A number stored without one used to be hashed as `+` plus its digits, producing
+a well-formed hash that matched nobody. Such numbers are now dropped and logged.
+If you store national-format numbers, set the country they belong to:
+
+```env
+GOOGLE_ADS_DEFAULT_CALLING_CODE=1   # 1 = US/Canada, 44 = UK, 61 = AU
+```
+
+Storing numbers in E.164 (`+15551234567`) is better still and needs no setting.
+
+### 5. Microsoft Advertising needs an extra credential
+
+The driver now targets the correct endpoint and requires the ad account ID
+alongside the manager ID:
+
+```env
+MICROSOFT_ADS_ACCOUNT_ID=
+```
+
+The channel previously posted to a URL that does not exist, so nothing it
+reported was ever delivered. Run `php artisan ad-conversions:test` to confirm.
+
+### 6. Commands were renamed
+
+| Old | New |
+| :-- | :-- |
+| `google-ads:upload` | `ad-conversions:upload` |
+| `google-ads:sync` | `ad-conversions:sync` |
+| `google-ads:test-connection` | `ad-conversions:test` |
+
+The old names still work as aliases, so scheduled tasks keep running. Update
+them when convenient.
+
+### 7. `record()` now returns a bool
+
+It returns `false` when a conversion could not be attributed to anything. The
+signature is otherwise unchanged, so existing calls that ignore the return value
+need no edit — but this is the cheapest way to find out you are recording
+conversions that will never be delivered.
+
+```php
+if (! GoogleAdsConversions::record('Quote Form', 100.0)) {
+    Log::warning('Lead had no click identifier to attribute.');
 }
 ```
 
----
+### 8. Unrecognised consent values now fail closed
 
-### 3. Configuration Updates
+A consent string matching neither the granted nor the denied vocabulary maps to
+`DENIED` instead of `UNSPECIFIED`. To restore the previous behaviour:
 
-Run:
+```env
+GOOGLE_ADS_CONSENT_UNKNOWN=unspecified
+```
+
+### 9. Republish the config
+
+Several keys were added: `microsoft.account_id`, `linkedin.version`,
+`privacy.prune_pending`, `privacy.default_calling_code`,
+`consent.unknown_maps_to`, `dashboard.path`.
+
 ```bash
 php artisan vendor:publish --tag="laravel-google-ads-conversions-config" --force
 ```
-*(Or review the new `privacy`, `consent`, `enhanced_conversions`, and `login_customer_id` sections in `config/google-ads-conversions.php`).*
 
----
+Diff the result against your existing file before committing.
 
-### 4. GDPR & Cookie Consent Gating
+### 10. The dirty-set cache key changed shape
 
-By default, the package now supports cookie consent gating for GDPR & ePrivacy compliance in the EU and UK:
-- If you want the previous behavior where persistent cookies are always set immediately, ensure `'cookie_consent' => 'always'` in config (the default).
-- For automatic cookie consent gating with tools like Cookiebot, OneTrust, or Spatie Cookie Consent, set:
-  ```php
-  'privacy' => [
-      'cookie_consent' => 'auto',
-  ],
-  ```
+`GoogleAdsConversions::DIRTY_SET_KEY` is no longer written to — the set is
+sharded across `DIRTY_BUCKET_PREFIX` buckets. The old key is still drained on
+sync, so nothing buffered by v0.x is stranded during the upgrade. If you read
+that constant directly, use `pendingClickIds()` instead.
+
+### 11. Marketing views were removed
+
+`resources/views/landing.blade.php` and `docs.blade.php` no longer ship with the
+package. If you were rendering `google-ads-conversions::landing`, copy the file
+from v0.2.0 into your own application's views.
