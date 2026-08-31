@@ -51,7 +51,10 @@ class CaptureGclid
         $hasCookieConsent = $this->consentManager->hasCookieConsent($request);
 
         $visitorCookieName = $cookieConfig['visitor_id'] ?? 'google_ads_visitor_id';
-        $visitorId = $request->cookie($visitorCookieName);
+        // Cookies can be arrays too: a request carrying
+        // `google_ads_visitor_id[]=x` would otherwise reach a string-typed
+        // parameter and throw, exactly as the query-string case did.
+        $visitorId = $this->scalarCookie($request, $visitorCookieName);
 
         if (! $visitorId) {
             $visitorId = (string) Str::uuid();
@@ -113,6 +116,22 @@ class CaptureGclid
         }
 
         return $value;
+    }
+
+    /**
+     * Read a cookie that must be a short, single-value string.
+     */
+    protected function scalarCookie(Request $request, string $key): ?string
+    {
+        $value = $request->cookie($key);
+
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        return ($value === '' || mb_strlen($value) > self::MAX_CLICK_ID_LENGTH) ? null : $value;
     }
 
     /**
