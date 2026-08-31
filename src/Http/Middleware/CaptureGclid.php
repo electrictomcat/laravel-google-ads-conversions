@@ -20,6 +20,14 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class CaptureGclid
 {
+    /**
+     * Upper bound for any captured identifier or tracking parameter.
+     *
+     * Real click IDs are well under 200 characters; the default schema stores
+     * them in a 255-character column.
+     */
+    public const MAX_CLICK_ID_LENGTH = 255;
+
     public function __construct(
         protected GoogleAdsConversions $tracker,
         protected ConsentManager $consentManager,
@@ -34,9 +42,9 @@ class CaptureGclid
             'wbraid' => 'google_ads_wbraid',
         ]);
 
-        $gclid = $request->query('gclid');
-        $gbraid = $request->query('gbraid');
-        $wbraid = $request->query('wbraid');
+        $gclid = $this->scalarQuery($request, 'gclid');
+        $gbraid = $this->scalarQuery($request, 'gbraid');
+        $wbraid = $this->scalarQuery($request, 'wbraid');
 
         $primaryClickId = $gclid ?? $gbraid ?? $wbraid;
 
@@ -83,6 +91,31 @@ class CaptureGclid
     }
 
     /**
+     * Read a query parameter that must be a short, single-value string.
+     *
+     * Query strings can carry arrays (`?gclid[]=x`) and arbitrarily long values.
+     * Both would otherwise reach string-typed parameters and column-width limits
+     * further down the pipeline, so anything that isn't a plausible click
+     * identifier is discarded here rather than blowing up later.
+     */
+    protected function scalarQuery(Request $request, string $key): ?string
+    {
+        $value = $request->query($key);
+
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        if ($value === '' || mb_strlen($value) > self::MAX_CLICK_ID_LENGTH) {
+            return null;
+        }
+
+        return $value;
+    }
+
+    /**
      * @param  array<string, mixed>  $cookieConfig
      */
     protected function makeCookie(string $name, string $value, array $cookieConfig): \Symfony\Component\HttpFoundation\Cookie
@@ -115,7 +148,7 @@ class CaptureGclid
         $data = [
             'visitor_id' => $visitorId,
             'landing_page' => $request->getPathInfo(),
-            'source' => $request->query('utm_source', 'google_ads'),
+            'source' => $this->scalarQuery($request, 'utm_source') ?? 'google_ads',
         ];
 
         if ($gclid) {
@@ -131,7 +164,7 @@ class CaptureGclid
         }
 
         foreach ((array) config('google-ads-conversions.tracked_query_parameters', []) as $param) {
-            $data[$param] = $request->query($param);
+            $data[$param] = $this->scalarQuery($request, (string) $param);
         }
 
         return $data;
