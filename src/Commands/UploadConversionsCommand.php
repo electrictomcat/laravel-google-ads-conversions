@@ -8,12 +8,19 @@ use Illuminate\Console\Command;
 
 class UploadConversionsCommand extends Command
 {
-    protected $signature = 'google-ads:upload
+    protected $signature = 'ad-conversions:upload
                             {--dry-run : Validate conversion uploads with Google Ads without committing them}
                             {--force : Force upload pending conversions immediately, ignoring the delay window}
                             {--delay= : Override the upload delay window in hours}';
 
     protected $description = 'Flush cached conversions to the database and upload pending conversions to Google Ads';
+
+    /**
+     * Kept so existing schedulers and runbooks keep working.
+     *
+     * @var array<int, string>
+     */
+    protected $aliases = ['google-ads:upload'];
 
     public function handle(GoogleAdsConversions $tracker, ConversionUploader $uploader): int
     {
