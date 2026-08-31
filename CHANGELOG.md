@@ -2,7 +2,7 @@
 
 All notable changes to `laravel-google-ads-conversions` will be documented in this file.
 
-## v2.0.0 - Unreleased
+## v1.0.0 - 2026-08-31
 
 The first release of the multi-channel engine, and a set of fixes for ways the
 previous behaviour could silently lose conversions.
