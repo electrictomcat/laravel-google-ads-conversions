@@ -19,7 +19,7 @@ interface ConversionDriverInterface
     /**
      * Upload a batch of conversion payloads to the advertising network.
      *
-     * @param  array<int, ConversionPayload>  $conversions
+     * @param  array<int, ConversionPayload|array<string, mixed>>  $conversions
      * @return array{success: bool, count: int, errors: array<int, string>, raw_response: mixed}
      */
     public function upload(array $conversions, bool $validateOnly = false): array;
