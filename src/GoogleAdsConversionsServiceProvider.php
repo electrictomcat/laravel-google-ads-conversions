@@ -7,14 +7,12 @@ use ElectricTomCat\GoogleAdsConversions\Commands\InstallCommand;
 use ElectricTomCat\GoogleAdsConversions\Commands\SyncConversionsCommand;
 use ElectricTomCat\GoogleAdsConversions\Commands\TestConnectionCommand;
 use ElectricTomCat\GoogleAdsConversions\Commands\UploadConversionsCommand;
-use ElectricTomCat\GoogleAdsConversions\Http\Controllers\DashboardController;
 use ElectricTomCat\GoogleAdsConversions\Http\Middleware\CaptureGclid;
 use ElectricTomCat\GoogleAdsConversions\Support\ConsentManager;
 use ElectricTomCat\GoogleAdsConversions\Support\EventResolver;
 use ElectricTomCat\GoogleAdsConversions\Support\UserDataHasher;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Blade;
-use Illuminate\Support\Facades\Route;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 
@@ -25,7 +23,6 @@ class GoogleAdsConversionsServiceProvider extends PackageServiceProvider
         $package
             ->name('laravel-google-ads-conversions')
             ->hasConfigFile()
-            ->hasViews('google-ads-conversions')
             ->hasMigration('create_leads_table')
             ->hasCommands([
                 InstallCommand::class,
@@ -41,10 +38,6 @@ class GoogleAdsConversionsServiceProvider extends PackageServiceProvider
         $this->app->singleton(EventResolver::class);
         $this->app->singleton(ConsentManager::class);
         $this->app->singleton(UserDataHasher::class);
-
-        $this->app->singleton(ConversionManager::class, function ($app) {
-            return new ConversionManager($app);
-        });
 
         $this->app->singleton(GoogleAdsConversions::class, function ($app) {
             return new GoogleAdsConversions(
@@ -68,18 +61,6 @@ class GoogleAdsConversionsServiceProvider extends PackageServiceProvider
             /** @var Router $router */
             $router = $this->app->make(Router::class);
             $router->aliasMiddleware('capture-gclid', CaptureGclid::class);
-        }
-
-        // The dashboard exposes lead counts, click identifiers and attributed
-        // revenue, so the fallbacks here are deliberately closed: an app whose
-        // published config predates this key must not have the route appear.
-        if (config('google-ads-conversions.dashboard.enabled', false)) {
-            $path = config('google-ads-conversions.dashboard.path', 'ad-conversions');
-            $middleware = config('google-ads-conversions.dashboard.middleware', ['web', 'auth']);
-
-            Route::middleware($middleware)->group(function () use ($path) {
-                Route::get($path, DashboardController::class)->name('ad-conversions.dashboard');
-            });
         }
 
         // Register Blade Directives for Form Inputs

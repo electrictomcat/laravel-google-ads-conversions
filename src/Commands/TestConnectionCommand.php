@@ -2,134 +2,67 @@
 
 namespace ElectricTomCat\GoogleAdsConversions\Commands;
 
-use ElectricTomCat\GoogleAdsConversions\Contracts\ConversionDriverInterface;
-use ElectricTomCat\GoogleAdsConversions\ConversionManager;
 use ElectricTomCat\GoogleAdsConversions\ConversionUploader;
 use Illuminate\Console\Command;
 
 class TestConnectionCommand extends Command
 {
-    protected $signature = 'ad-conversions:test
-                            {--channel=* : Only test these channels}
+    protected $signature = 'google-ads:test-connection
                             {--skip-actions : Skip resolving configured conversion action names}';
 
-    protected $description = 'Verify every configured channel\'s credentials against its live API';
+    protected $description = 'Verify Google Ads API credentials and conversion actions';
 
     /** @var array<int, string> */
-    protected $aliases = ['google-ads:test-connection'];
+    protected $aliases = ['ad-conversions:test'];
 
-    public function handle(ConversionManager $manager, ConversionUploader $uploader): int
+    public function handle(ConversionUploader $uploader): int
     {
-        $channels = (array) $this->option('channel');
-        $channels = $channels === []
-            ? (array) config('google-ads-conversions.enabled_channels', ['google', 'meta', 'microsoft', 'linkedin', 'tiktok'])
-            : $channels;
+        $customerId = config('google-ads-conversions.customer_id');
 
-        $this->components->info('Testing channel credentials against the live APIs');
-
-        $rows = [];
-        $problems = [];
-        $failed = 0;
-        $tested = 0;
-
-        foreach ($channels as $channel) {
-            $channel = strtolower(trim((string) $channel));
-
-            try {
-                /** @var ConversionDriverInterface $driver */
-                $driver = $manager->driver($channel);
-            } catch (\Throwable $e) {
-                $rows[] = [$channel, '<error>ERROR</error>', 'see below'];
-                $problems[$channel] = $e->getMessage();
-                $failed++;
-
-                continue;
-            }
-
-            if (! $driver->isConfigured()) {
-                $rows[] = [$channel, '<comment>SKIPPED</comment>', 'Not configured'];
-
-                continue;
-            }
-
-            $tested++;
-            $result = $driver->testConnection();
-
-            if ($result['success']) {
-                $rows[] = [$channel, '<info>OK</info>', $result['message']];
-            } else {
-                $rows[] = [$channel, '<error>FAILED</error>', 'see below'];
-                $problems[$channel] = $result['message'];
-                $failed++;
-            }
-        }
-
-        $this->table(['Channel', 'Status', 'Detail'], $rows);
-
-        // Printed in full underneath rather than squeezed into a table cell,
-        // where the message that says what to fix gets truncated away.
-        foreach ($problems as $channel => $message) {
-            $this->newLine();
-            $this->components->error("{$channel}: {$message}");
-        }
-
-        if ($tested === 0) {
-            $this->components->warn('No channel is configured. Add credentials to your .env and try again.');
+        if (empty($customerId)) {
+            $this->components->error('Google Ads Customer ID is not set. Run php artisan google-ads:install or set GOOGLE_ADS_CUSTOMER_ID in your .env');
 
             return self::FAILURE;
         }
 
-        if (! $this->option('skip-actions')) {
-            $failed += $this->testConversionActions($uploader);
-        }
+        $this->components->info('Testing Google Ads API connection for Customer ID: ' . $customerId);
 
-        if ($failed > 0) {
-            $this->components->error("{$failed} check(s) failed.");
+        try {
+            $client = $uploader->getClient();
+            if (! $client) {
+                $this->components->error('Failed to instantiate Google Ads API Client. Check developer token and OAuth credentials.');
+
+                return self::FAILURE;
+            }
+
+            $this->components->info('Google Ads API client instantiated successfully.');
+
+            if (! $this->option('skip-actions')) {
+                $actions = (array) config('google-ads-conversions.events', []);
+                $actionNames = array_values(array_filter(array_map(function ($ev) {
+                    return is_array($ev) ? ($ev['action'] ?? null) : $ev;
+                }, $actions)));
+
+                if (! empty($actionNames)) {
+                    $this->line('Validating conversion action names against Google Ads account:');
+                    foreach ($actionNames as $name) {
+                        try {
+                            $resourceName = $uploader->resolveConversionActionResourceName($name);
+                            $this->line("  ✓ <info>{$name}</info> -> {$resourceName}");
+                        } catch (\Throwable $e) {
+                            $this->line("  ✗ <error>{$name}</error>: {$e->getMessage()}");
+                        }
+                    }
+                }
+            }
+
+            $this->components->info('Google Ads connection verified successfully.');
+
+            return self::SUCCESS;
+        } catch (\Throwable $e) {
+            $this->components->error('Connection failed: ' . $e->getMessage());
 
             return self::FAILURE;
         }
-
-        $this->components->info('All checks passed.');
-
-        return self::SUCCESS;
-    }
-
-    /**
-     * Resolve every configured event to a Google Ads conversion action.
-     *
-     * @return int number of failures
-     */
-    protected function testConversionActions(ConversionUploader $uploader): int
-    {
-        $events = (array) config('google-ads-conversions.events', []);
-
-        if ($events === []) {
-            $this->newLine();
-            $this->components->warn('No events are mapped in config/google-ads-conversions.php.');
-
-            return 0;
-        }
-
-        $this->newLine();
-        $this->components->info('Resolving configured conversion actions');
-
-        $rows = [];
-        $failed = 0;
-
-        foreach ($events as $event => $config) {
-            $actionName = is_array($config) ? ($config['action'] ?? $event) : $config;
-            $resolved = $uploader->resolveActionResourceName((string) $actionName);
-
-            if ($resolved) {
-                $rows[] = [$event, $actionName, "<info>{$resolved}</info>"];
-            } else {
-                $rows[] = [$event, $actionName, '<error>Could not resolve</error>'];
-                $failed++;
-            }
-        }
-
-        $this->table(['Event', 'Configured action', 'Google Ads resource name'], $rows);
-
-        return $failed;
     }
 }
