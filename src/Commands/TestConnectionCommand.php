@@ -25,17 +25,19 @@ class TestConnectionCommand extends Command
             return self::FAILURE;
         }
 
-        $this->components->info('Testing Google Ads API connection for Customer ID: ' . $customerId);
+        $this->components->info('Testing Google Ads API connection for Customer ID: '.$customerId);
 
         try {
-            $client = $uploader->getClient();
-            if (! $client) {
-                $this->components->error('Failed to instantiate Google Ads API Client. Check developer token and OAuth credentials.');
+            $result = $uploader->probeAccount();
+
+            if (! $result['success']) {
+                $this->components->error('Connection failed: '.$result['message']);
 
                 return self::FAILURE;
             }
 
-            $this->components->info('Google Ads API client instantiated successfully.');
+            $accountDesc = $result['descriptive_name'] ?? 'Google Ads Account';
+            $this->components->info("Google Ads connection verified successfully for: {$accountDesc}");
 
             if (! $this->option('skip-actions')) {
                 $actions = (array) config('google-ads-conversions.events', []);
@@ -47,8 +49,12 @@ class TestConnectionCommand extends Command
                     $this->line('Validating conversion action names against Google Ads account:');
                     foreach ($actionNames as $name) {
                         try {
-                            $resourceName = $uploader->resolveConversionActionResourceName($name);
-                            $this->line("  ✓ <info>{$name}</info> -> {$resourceName}");
+                            $resourceName = $uploader->resolveActionResourceName($name);
+                            if ($resourceName) {
+                                $this->line("  ✓ <info>{$name}</info> -> {$resourceName}");
+                            } else {
+                                $this->line("  ✗ <error>{$name}</error>: Conversion action not found");
+                            }
                         } catch (\Throwable $e) {
                             $this->line("  ✗ <error>{$name}</error>: {$e->getMessage()}");
                         }
@@ -56,11 +62,9 @@ class TestConnectionCommand extends Command
                 }
             }
 
-            $this->components->info('Google Ads connection verified successfully.');
-
             return self::SUCCESS;
         } catch (\Throwable $e) {
-            $this->components->error('Connection failed: ' . $e->getMessage());
+            $this->components->error('Connection failed: '.$e->getMessage());
 
             return self::FAILURE;
         }

@@ -38,7 +38,7 @@ class InstallCommand extends Command
 
         $missing = [];
         foreach ($keys as $configKey => $envVar) {
-            $val = config('google-ads-conversions.' . $configKey);
+            $val = config('google-ads-conversions.'.$configKey);
             if (empty($val)) {
                 $missing[] = $envVar;
                 $this->line("  ✗ <error>{$envVar}</error> is missing");
