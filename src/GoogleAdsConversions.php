@@ -7,6 +7,7 @@ use ElectricTomCat\GoogleAdsConversions\Contracts\HasConversions;
 use ElectricTomCat\GoogleAdsConversions\Events\ConversionRecorded;
 use ElectricTomCat\GoogleAdsConversions\Events\ConversionsSynced;
 use ElectricTomCat\GoogleAdsConversions\Models\Lead;
+use ElectricTomCat\GoogleAdsConversions\Support\ClickIdentifier;
 use ElectricTomCat\GoogleAdsConversions\Support\EventResolver;
 use ElectricTomCat\GoogleAdsConversions\Support\UserDataHasher;
 use Illuminate\Contracts\Cache\LockProvider;
@@ -136,11 +137,39 @@ class GoogleAdsConversions
     }
 
     /**
-     * Any resolved click identifier (gclid ?? gbraid ?? wbraid).
+     * Any resolved click identifier, as an opaque string.
+     *
+     * @deprecated Prefer clickIdentifier(): this loses which of the three
+     *             kinds the value is, and Google rejects a gbraid placed in
+     *             the gclid field. Kept so existing call sites keep working.
      */
     public function clickId(): ?string
     {
-        return $this->gclid() ?? $this->gbraid() ?? $this->wbraid();
+        return $this->clickIdentifier()?->value;
+    }
+
+    /**
+     * Any resolved click identifier, carrying its type.
+     *
+     * Store this rather than clickId() when you keep the identifier on your
+     * own records: passing it back later tells record() which of Google's
+     * three fields the value belongs in.
+     */
+    public function clickIdentifier(): ?ClickIdentifier
+    {
+        if ($gclid = $this->gclid()) {
+            return ClickIdentifier::gclid($gclid);
+        }
+
+        if ($gbraid = $this->gbraid()) {
+            return ClickIdentifier::gbraid($gbraid);
+        }
+
+        if ($wbraid = $this->wbraid()) {
+            return ClickIdentifier::wbraid($wbraid);
+        }
+
+        return null;
     }
 
     /**
@@ -167,7 +196,9 @@ class GoogleAdsConversions
      * @param  string  $eventName  Internal event name or Google Ads action name
      * @param  float|null  $value  Monetary conversion value
      * @param  string|null  $currency  ISO 4217 currency code (e.g. 'USD', 'EUR')
-     * @param  string|null  $gclid  Optional direct GCLID override
+     * @param  ClickIdentifier|string|null  $gclid  A GCLID, or a ClickIdentifier
+     *                                              of any kind, which is routed
+     *                                              to the correct field
      * @param  string|null  $gbraid  Optional direct GBRAID override
      * @param  string|null  $wbraid  Optional direct WBRAID override
      * @param  string|null  $orderId  Optional unique order / transaction ID for deduplication
@@ -179,7 +210,7 @@ class GoogleAdsConversions
         string $eventName,
         ?float $value = null,
         ?string $currency = null,
-        ?string $gclid = null,
+        ClickIdentifier|string|null $gclid = null,
         ?string $gbraid = null,
         ?string $wbraid = null,
         ?string $orderId = null,
@@ -187,10 +218,18 @@ class GoogleAdsConversions
         array|bool|null $consent = null,
         array $userIdentifiers = [],
     ): bool {
+        // A ClickIdentifier knows which of Google's three fields it belongs
+        // in, so unpack it rather than assuming the caller passed a gclid.
+        if ($gclid instanceof ClickIdentifier) {
+            ['gclid' => $gclid, 'gbraid' => $unpackedGbraid, 'wbraid' => $unpackedWbraid] = $gclid->toArguments();
+            $gbraid ??= $unpackedGbraid;
+            $wbraid ??= $unpackedWbraid;
+        }
+
         $enhancedEnabled = (bool) config('google-ads-conversions.enhanced_conversions.enabled', false);
         $hasIdentifiers = $enhancedEnabled && ! empty($this->hasher->hashUserIdentifiers($userIdentifiers));
 
-        $resolvedClickId = $gclid ?? $gbraid ?? $wbraid ?? $this->clickId();
+        $resolvedClickId = $gclid ?? $gbraid ?? $wbraid ?? $this->clickIdentifier()?->value;
         $bufferKey = $resolvedClickId;
         $identifierOnly = false;
 
@@ -425,12 +464,12 @@ class GoogleAdsConversions
 
             if ($isVisitorKey) {
                 $lead->setVisitorId(substr($clickId, strlen(self::VISITOR_KEY_PREFIX)));
-            } elseif (isset($leadData['gbraid'])) {
-                $lead->setGbraid($clickId);
-            } elseif (isset($leadData['wbraid'])) {
-                $lead->setWbraid($clickId);
             } else {
-                $lead->setGclid($clickId);
+                match ($this->identifierTypeFor($clickId, $leadData, $cached)) {
+                    ClickIdentifier::GBRAID => $lead->setGbraid($clickId),
+                    ClickIdentifier::WBRAID => $lead->setWbraid($clickId),
+                    default => $lead->setGclid($clickId),
+                };
             }
         }
 
@@ -463,6 +502,44 @@ class GoogleAdsConversions
         // Only now that the row is safely written do the buffers go.
         Cache::forget(self::LEAD_DATA_PREFIX.$clickId);
         Cache::forget(self::CACHE_PREFIX.$clickId);
+    }
+
+    /**
+     * Work out which of Google's three columns a click identifier belongs in.
+     *
+     * This used to look only at the middleware's buffered tracking data and
+     * default to gclid otherwise - so a gbraid recorded through record()
+     * without the middleware, or after that buffer's two-day TTL had expired,
+     * was written to the gclid column. Google then answers "The imported gclid
+     * could not be decoded" and the conversion is lost.
+     *
+     * The recorded conversions carry the type too, so they are consulted
+     * before falling back to the value's own shape.
+     *
+     * @param  array<string, mixed>|null  $leadData
+     * @param  array<int, array<string, mixed>>|null  $cached
+     */
+    protected function identifierTypeFor(string $clickId, ?array $leadData, ?array $cached): string
+    {
+        foreach ([ClickIdentifier::GBRAID, ClickIdentifier::WBRAID, ClickIdentifier::GCLID] as $type) {
+            if (isset($leadData[$type]) && $leadData[$type] === $clickId) {
+                return $type;
+            }
+        }
+
+        foreach ($cached ?? [] as $conversion) {
+            foreach ([ClickIdentifier::GBRAID, ClickIdentifier::WBRAID, ClickIdentifier::GCLID] as $type) {
+                if (isset($conversion[$type]) && $conversion[$type] === $clickId) {
+                    return $type;
+                }
+            }
+        }
+
+        // Nothing said which it is. A braid-shaped value is certainly not a
+        // gclid, so guessing gclid would guarantee a rejection.
+        return ClickIdentifier::looksLikeBraid($clickId)
+            ? ClickIdentifier::GBRAID
+            : ClickIdentifier::GCLID;
     }
 
     /**

@@ -38,7 +38,7 @@ class ConversionPayload
         public ?string $eventSourceUrl = null,
     ) {
         if ($this->timestamp === 0) {
-            $this->timestamp = now()->timestamp;
+            $this->timestamp = (int) now()->timestamp;
         }
 
         if ($this->currency !== null) {

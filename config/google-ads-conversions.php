@@ -251,11 +251,31 @@ return [
         'ttclid' => 'tiktok_ads_ttclid',
         'li_fat_id' => 'linkedin_ads_lifatid',
         'visitor_id' => 'google_ads_visitor_id',
-        'lifetime_minutes' => 60 * 24 * 30, // 30 days
+        // 90 days, matching the window in which Google still accepts an
+        // offline conversion for a click. At the previous 30 days the
+        // identifier was already gone for any conversion that took longer
+        // than a month to close, and record() had nothing to attribute.
+        'lifetime_minutes' => 60 * 24 * 90,
         'domain' => null,
         'secure' => env('SESSION_SECURE_COOKIE', null),
         'http_only' => false,
         'same_site' => 'Lax',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Click identifier handling
+    |--------------------------------------------------------------------------
+    |
+    | Google keeps gclid, gbraid and wbraid in separate fields and rejects a
+    | value put in the wrong one. When a value supplied as a gclid has the
+    | shape of a gbraid/wbraid, move it to the right field instead of sending
+    | something certain to be refused. Set to false to send it unchanged.
+    |
+    */
+
+    'click_identifiers' => [
+        'autocorrect' => (bool) env('GOOGLE_ADS_AUTOCORRECT_CLICK_IDS', true),
     ],
 
     'session_key' => 'google_ads_gclid',

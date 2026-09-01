@@ -1,8 +1,8 @@
 # Upgrading
 
-## From v0.x to v2.0
+## From v0.x to v1.0
 
-Most of v2 is additive, but a few things changed behaviour deliberately — in
+Most of v1.0 is additive, but a few things changed behaviour deliberately — in
 several cases because the old behaviour lost conversions. Work through the
 checklist below; nothing here takes long.
 

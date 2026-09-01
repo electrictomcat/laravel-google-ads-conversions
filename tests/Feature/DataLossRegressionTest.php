@@ -88,6 +88,30 @@ it('ignores a click identifier longer than the column can hold', function () {
     expect(tracker()->pendingClickIds())->toBeEmpty();
 });
 
+it('does not blow up when the visitor cookie arrives as an array', function () {
+    Route::middleware(['web', CaptureGclid::class])->get('/probe', fn () => 'ok');
+
+    // Cookies can be arrays too. This is the same defect as the query-string
+    // case, in the one place it was still reachable.
+    $this->withoutExceptionHandling()
+        ->withUnencryptedCookies(['google_ads_visitor_id' => ['a', 'b']])
+        ->get('/probe?gclid=cookie-array-probe')
+        ->assertOk();
+
+    expect(tracker()->pendingClickIds())->toContain('cookie-array-probe');
+});
+
+it('ignores an oversized visitor cookie', function () {
+    Route::middleware(['web', CaptureGclid::class])->get('/probe', fn () => 'ok');
+
+    $this->withoutExceptionHandling()
+        ->withUnencryptedCookies([
+            'google_ads_visitor_id' => str_repeat('a', CaptureGclid::MAX_CLICK_ID_LENGTH + 1),
+        ])
+        ->get('/probe?gclid=oversized-cookie-probe')
+        ->assertOk();
+});
+
 it('ignores array-valued tracked query parameters', function () {
     Route::middleware(['web', CaptureGclid::class])->get('/probe', fn () => 'ok');
 
