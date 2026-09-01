@@ -78,18 +78,17 @@ class Lead extends Model implements HasConversions
         $query = static::where('created_at', '<=', now()->subDays($retentionDays));
 
         if (! (bool) config('google-ads-conversions.privacy.prune_pending', false)) {
-            $column = $this->getConnection()->getQueryGrammar()->wrap($this->getTable().'.conversions');
-
-            // Postgres needs an explicit cast before a json/jsonb column can be
-            // pattern-matched; MySQL and SQLite store it as text already.
             if ($this->getConnection()->getDriverName() === 'pgsql') {
-                $column .= '::text';
+                $query->where(function (Builder $q) {
+                    $q->whereNull('conversions')
+                        ->orWhereRaw('conversions::text NOT LIKE ?', ['%"status":"pending"%']);
+                });
+            } else {
+                $query->where(function (Builder $q) {
+                    $q->whereNull('conversions')
+                        ->orWhereRaw('conversions NOT LIKE ?', ['%"status":"pending"%']);
+                });
             }
-
-            $query->where(function (Builder $q) use ($column) {
-                $q->whereNull('conversions')
-                    ->orWhereRaw("{$column} NOT LIKE ?", ['%"status":"pending"%']);
-            });
         }
 
         return $query;
