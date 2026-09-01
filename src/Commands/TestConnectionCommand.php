@@ -25,7 +25,7 @@ class TestConnectionCommand extends Command
             return self::FAILURE;
         }
 
-        $this->components->info('Testing Google Ads API connection for Customer ID: ' . $customerId);
+        $this->components->info('Testing Google Ads API connection for Customer ID: '.$customerId);
 
         try {
             $client = $uploader->getClient();
@@ -60,7 +60,7 @@ class TestConnectionCommand extends Command
 
             return self::SUCCESS;
         } catch (\Throwable $e) {
-            $this->components->error('Connection failed: ' . $e->getMessage());
+            $this->components->error('Connection failed: '.$e->getMessage());
 
             return self::FAILURE;
         }
