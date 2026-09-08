@@ -81,12 +81,18 @@ class Lead extends Model implements HasConversions
             if ($this->getConnection()->getDriverName() === 'pgsql') {
                 $query->where(function (Builder $q) {
                     $q->whereNull('conversions')
-                        ->orWhereRaw('conversions::text NOT LIKE ?', ['%"status":"pending"%']);
+                        ->orWhere(function (Builder $sub) {
+                            $sub->whereRaw('conversions::text NOT LIKE ?', ['%"status":"pending"%'])
+                                ->whereRaw('conversions::text NOT LIKE ?', ['%"status":"failed"%']);
+                        });
                 });
             } else {
                 $query->where(function (Builder $q) {
                     $q->whereNull('conversions')
-                        ->orWhereRaw('conversions NOT LIKE ?', ['%"status":"pending"%']);
+                        ->orWhere(function (Builder $sub) {
+                            $sub->whereRaw('conversions NOT LIKE ?', ['%"status":"pending"%'])
+                                ->whereRaw('conversions NOT LIKE ?', ['%"status":"failed"%']);
+                        });
                 });
             }
         }

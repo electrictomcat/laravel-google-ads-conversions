@@ -149,3 +149,11 @@ php artisan migrate
 ```
 
 The package dynamically detects available columns and column nullability so queries and click persistence remain safe even before the migration is run, but running this migration ensures iOS ATT clicks are properly stored in dedicated columns and leads without a GCLID are persisted cleanly.
+
+### 13. Conversion Retry Engine and Alerting Configuration
+
+Failed conversions are now automatically retried on subsequent upload sweeps up to `max_retries` (default: 5) before being marked permanently `rejected`. If your application publishes `config/google-ads-conversions.php`, you can customize:
+- `max_retries`: Maximum retry attempts before marking a conversion as permanently `rejected`.
+- `retry_delay_hours`: Minimum hours to wait before retrying a failed conversion.
+- `alerts`: Configure `webhook_url` (Slack, Discord, custom HTTP) and/or `mail_to` to receive automated alerts whenever conversions fail or get rejected.
+
