@@ -21,6 +21,9 @@ return new class extends Migration
             if (! Schema::hasColumn($tableName, 'wbraid')) {
                 $table->string('wbraid')->nullable()->index();
             }
+            if (Schema::hasColumn($tableName, 'gclid')) {
+                $table->string('gclid')->nullable()->change();
+            }
         });
     }
 

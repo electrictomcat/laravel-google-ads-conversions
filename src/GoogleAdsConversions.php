@@ -492,12 +492,29 @@ class GoogleAdsConversions
                 $lead->setVisitorId(substr($clickId, strlen(self::VISITOR_KEY_PREFIX)));
             } else {
                 $identifierType = $this->identifierTypeFor($clickId, $leadData, $cached);
+                $gclidNullable = ! $hasGclid || $this->modelColumnIsNullable('gclid');
 
-                match ($identifierType) {
-                    ClickIdentifier::GBRAID => $hasGbraid ? $lead->setGbraid($clickId) : $lead->setGclid($clickId),
-                    ClickIdentifier::WBRAID => $hasWbraid ? $lead->setWbraid($clickId) : $lead->setGclid($clickId),
-                    default => $lead->setGclid($clickId),
-                };
+                if ($identifierType === ClickIdentifier::GBRAID) {
+                    if ($hasGbraid) {
+                        $lead->setGbraid($clickId);
+                        if (! $gclidNullable) {
+                            $lead->setGclid($clickId);
+                        }
+                    } else {
+                        $lead->setGclid($clickId);
+                    }
+                } elseif ($identifierType === ClickIdentifier::WBRAID) {
+                    if ($hasWbraid) {
+                        $lead->setWbraid($clickId);
+                        if (! $gclidNullable) {
+                            $lead->setGclid($clickId);
+                        }
+                    } else {
+                        $lead->setGclid($clickId);
+                    }
+                } else {
+                    $lead->setGclid($clickId);
+                }
             }
         }
 
@@ -789,6 +806,13 @@ class GoogleAdsConversions
     protected static array $columnCache = [];
 
     /**
+     * In-memory cache of column nullability keyed by connection and table name.
+     *
+     * @var array<string, array<string, bool>>
+     */
+    protected static array $columnNullableCache = [];
+
+    /**
      * Check whether a column exists on the model's table.
      *
      * Memoized in-memory per connection/table so each sync or request only
@@ -820,11 +844,42 @@ class GoogleAdsConversions
     }
 
     /**
+     * Check whether a column is nullable on the model's table.
+     *
+     * Memoized in-memory per connection/table so each sync or request only
+     * queries the schema at most once.
+     */
+    public function modelColumnIsNullable(string $column): bool
+    {
+        /** @var Model $model */
+        $model = app($this->modelClass());
+        $connection = $model->getConnection();
+        $table = $model->getTable();
+        $cacheKey = $connection->getName().':'.$table;
+
+        if (! isset(self::$columnNullableCache[$cacheKey])) {
+            self::$columnNullableCache[$cacheKey] = [];
+
+            try {
+                $columns = $connection->getSchemaBuilder()->getColumns($table);
+                foreach ($columns as $col) {
+                    self::$columnNullableCache[$cacheKey][strtolower($col['name'])] = $col['nullable'];
+                }
+            } catch (\Throwable) {
+                // Ignore schema lookup errors and treat as nullable
+            }
+        }
+
+        return self::$columnNullableCache[$cacheKey][strtolower($column)] ?? true;
+    }
+
+    /**
      * Flush the column listing cache. Useful in tests or after dynamic migrations.
      */
     public static function flushColumnCache(): void
     {
         self::$columnCache = [];
+        self::$columnNullableCache = [];
     }
 
     /**

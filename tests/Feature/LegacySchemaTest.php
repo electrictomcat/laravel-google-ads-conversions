@@ -11,7 +11,7 @@ beforeEach(function () {
     Schema::dropIfExists('leads');
     Schema::create('leads', function (Blueprint $table) {
         $table->id();
-        $table->string('gclid')->nullable()->unique();
+        $table->string('gclid')->unique();
         $table->uuid('visitor_id')->nullable()->index();
         $table->json('conversions')->nullable();
         $table->text('landing_page')->nullable();
@@ -93,7 +93,7 @@ it('resolves visitor history on a legacy table without gbraid or wbraid columns'
     expect($tracker->gclid())->toBe($gclid);
 });
 
-it('warns about missing gbraid and wbraid columns in diagnose command', function () {
+it('warns about missing gbraid/wbraid columns and non-nullable gclid in diagnose command', function () {
     // Create a lead so reportLocalData runs
     Lead::create([
         'gclid' => 'gclid-diag-123',
@@ -102,12 +102,16 @@ it('warns about missing gbraid and wbraid columns in diagnose command', function
 
     $this->artisan('ad-conversions:diagnose')
         ->expectsOutputToContain('Table is missing gbraid/wbraid columns.')
+        ->expectsOutputToContain("Table column 'gclid' is NOT NULL.")
         ->assertExitCode(1);
 });
 
-it('adds gbraid and wbraid columns via migration and is idempotent', function () {
+it('adds gbraid and wbraid columns and makes gclid nullable via migration', function () {
+    $tracker = app(GoogleAdsConversions::class);
+
     expect(Schema::hasColumn('leads', 'gbraid'))->toBeFalse()
-        ->and(Schema::hasColumn('leads', 'wbraid'))->toBeFalse();
+        ->and(Schema::hasColumn('leads', 'wbraid'))->toBeFalse()
+        ->and($tracker->modelColumnIsNullable('gclid'))->toBeFalse();
 
     $migration = include __DIR__.'/../../database/migrations/add_gbraid_and_wbraid_to_leads_table.php.stub';
     $migration->up();
@@ -115,14 +119,57 @@ it('adds gbraid and wbraid columns via migration and is idempotent', function ()
     GoogleAdsConversions::flushColumnCache();
 
     expect(Schema::hasColumn('leads', 'gbraid'))->toBeTrue()
-        ->and(Schema::hasColumn('leads', 'wbraid'))->toBeTrue();
+        ->and(Schema::hasColumn('leads', 'wbraid'))->toBeTrue()
+        ->and($tracker->modelColumnIsNullable('gclid'))->toBeTrue();
+
+    // Can now insert a lead with only gbraid and no gclid without SQL integrity constraint violation
+    $lead = Lead::create([
+        'visitor_id' => (string) Str::uuid(),
+        'gbraid' => '0AAAAA_test_braid',
+    ]);
+    expect($lead->getGbraid())->toBe('0AAAAA_test_braid')
+        ->and($lead->getGclid())->toBeNull();
 
     // Running again does not throw or fail (idempotent)
     $migration->up();
-    expect(Schema::hasColumn('leads', 'gbraid'))->toBeTrue();
+    expect(Schema::hasColumn('leads', 'gbraid'))->toBeTrue()
+        ->and($tracker->modelColumnIsNullable('gclid'))->toBeTrue();
 
-    // Down drops them
+    // Down drops braid columns
     $migration->down();
     expect(Schema::hasColumn('leads', 'gbraid'))->toBeFalse()
         ->and(Schema::hasColumn('leads', 'wbraid'))->toBeFalse();
+});
+
+it('safely syncs a gbraid click when gbraid column exists but gclid is NOT NULL', function () {
+    // Manually add gbraid column without making gclid nullable
+    Schema::table('leads', function (Blueprint $table) {
+        $table->string('gbraid')->nullable()->index();
+    });
+    GoogleAdsConversions::flushColumnCache();
+
+    $tracker = app(GoogleAdsConversions::class);
+    expect($tracker->modelHasColumn('gbraid'))->toBeTrue()
+        ->and($tracker->modelColumnIsNullable('gclid'))->toBeFalse();
+
+    $gbraid = '0AAAAA_non_nullable_gclid_test';
+
+    Cache::put(GoogleAdsConversions::CACHE_PREFIX.$gbraid, [[
+        'event' => 'Lead Form',
+        'timestamp' => now()->timestamp,
+        'status' => 'pending',
+    ]]);
+    Cache::put(GoogleAdsConversions::LEAD_DATA_PREFIX.$gbraid, [
+        'gbraid' => $gbraid,
+        'landing_page' => '/contact',
+    ]);
+    Cache::put(GoogleAdsConversions::DIRTY_BUCKET_PREFIX.(crc32($gbraid) % GoogleAdsConversions::DIRTY_BUCKETS), [$gbraid]);
+
+    // syncToDatabase must not throw SQL integrity constraint violation for gclid cannot be null
+    $tracker->syncToDatabase();
+
+    $lead = Lead::where('gclid', $gbraid)->first();
+    expect($lead)->not->toBeNull()
+        ->and($lead->getGbraid())->toBe($gbraid)
+        ->and($lead->getGclid())->toBe($gbraid);
 });

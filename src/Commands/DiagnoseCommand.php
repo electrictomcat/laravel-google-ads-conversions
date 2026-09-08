@@ -140,6 +140,13 @@ class DiagnoseCommand extends Command
             $problems++;
         }
 
+        if ($hasGclid && ! $tracker->modelColumnIsNullable('gclid')) {
+            $this->line('  <fg=yellow>Table column \'gclid\' is NOT NULL.</>');
+            $this->line('    <fg=gray>Incoming GBRAID/WBRAID leads without a GCLID will fail database insertion.</>');
+            $this->line('    <fg=gray>Run `php artisan vendor:publish --tag=laravel-google-ads-conversions-migrations` and `php artisan migrate` to make gclid nullable.</>');
+            $problems++;
+        }
+
         // Leads with no click identifier at all cannot be attributed.
         $unattributableQuery = $modelClass::query()->where('created_at', '>=', $since);
         if ($hasGclid) {
