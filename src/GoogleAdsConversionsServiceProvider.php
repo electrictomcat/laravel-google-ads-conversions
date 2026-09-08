@@ -66,6 +66,15 @@ class GoogleAdsConversionsServiceProvider extends PackageServiceProvider
             $router->aliasMiddleware('capture-gclid', CaptureGclid::class);
         }
 
+        if ($this->app->runningInConsole()) {
+            if ($migrations = static::pathsToPublish(null, 'google-ads-conversions-migrations')) {
+                $this->publishes($migrations, 'laravel-google-ads-conversions-migrations');
+            }
+            if ($configs = static::pathsToPublish(null, 'google-ads-conversions-config')) {
+                $this->publishes($configs, 'laravel-google-ads-conversions-config');
+            }
+        }
+
         // Register Blade Directives for Form Inputs
         Blade::directive('googleAdsClickInputs', function () {
             return '<?php

@@ -140,6 +140,13 @@ class DiagnoseCommand extends Command
             $problems++;
         }
 
+        if ($hasGclid && ! $tracker->modelColumnIsNullable('gclid')) {
+            $this->line('  <fg=yellow>Table column \'gclid\' is NOT NULL.</>');
+            $this->line('    <fg=gray>Incoming GBRAID/WBRAID leads without a GCLID will fail database insertion.</>');
+            $this->line('    <fg=gray>Run `php artisan vendor:publish --tag=laravel-google-ads-conversions-migrations` and `php artisan migrate` to make gclid nullable.</>');
+            $problems++;
+        }
+
         // Leads with no click identifier at all cannot be attributed.
         $unattributableQuery = $modelClass::query()->where('created_at', '>=', $since);
         if ($hasGclid) {
@@ -217,21 +224,28 @@ class DiagnoseCommand extends Command
 
         // Conversions we already know Google refused.
         $failed = 0;
+        $rejectedCount = 0;
         $reasons = [];
+        $rejectedReasons = [];
 
         $modelClass::query()
             ->whereNotNull('conversions')
-            ->chunkById(200, function ($leads) use (&$failed, &$reasons) {
+            ->chunkById(200, function ($leads) use (&$failed, &$rejectedCount, &$reasons, &$rejectedReasons) {
                 foreach ($leads as $lead) {
                     if (! $lead instanceof HasConversions) {
                         continue;
                     }
 
                     foreach ($lead->getConversions() as $conversion) {
-                        if (($conversion['status'] ?? '') === 'failed') {
+                        $status = $conversion['status'] ?? '';
+                        if ($status === 'failed') {
                             $failed++;
                             $reason = (string) ($conversion['error'] ?? 'Unknown');
                             $reasons[$reason] = ($reasons[$reason] ?? 0) + 1;
+                        } elseif ($status === 'rejected') {
+                            $rejectedCount++;
+                            $reason = (string) ($conversion['error'] ?? 'Unknown');
+                            $rejectedReasons[$reason] = ($rejectedReasons[$reason] ?? 0) + 1;
                         }
                     }
                 }
@@ -242,6 +256,17 @@ class DiagnoseCommand extends Command
 
             arsort($reasons);
             foreach (array_slice($reasons, 0, 5, true) as $reason => $count) {
+                $this->line("    <fg=gray>{$count}x</> ".mb_substr($reason, 0, 110));
+            }
+
+            $problems++;
+        }
+
+        if ($rejectedCount > 0) {
+            $this->line("  <fg=red>{$rejectedCount} conversion(s) permanently rejected (exhausted max retries):</>");
+
+            arsort($rejectedReasons);
+            foreach (array_slice($rejectedReasons, 0, 5, true) as $reason => $count) {
                 $this->line("    <fg=gray>{$count}x</> ".mb_substr($reason, 0, 110));
             }
 

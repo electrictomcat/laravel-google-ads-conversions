@@ -2,12 +2,21 @@
 
 All notable changes to `laravel-google-ads-conversions` will be documented in this file.
 
+## v1.2.0 - 2026-09-08
+
+### Added
+- **Conversion retry engine with backoff and terminal `rejected` status.** Conversions rejected by Google Ads (or other channels) are no longer permanently stranded in `failed` state. They are automatically retried on subsequent upload sweeps up to a configurable `max_retries` (default: 5) and respect `retry_delay_hours` (default: 1) backoff.
+- **Conversion age retention protection.** Conversions older than 90 days (`CLICK_RETENTION_DAYS`) are permanently rejected as Google Ads rejects clicks older than 90 days.
+- **Pruning protection for retrying conversions.** `Lead::prunable()` protects both `pending` and `failed` (awaiting retry) conversions from premature pruning, but permits pruning once terminal (`rejected` or `uploaded`).
+- **Failure and rejection notifications.** Supports webhook alerts (compatible with Slack, Discord, and raw HTTP endpoints), email alerts via `ConversionAlertMail`, and dispatches the `ConversionRejected` domain event when a conversion exhausts its retries.
+- **Enhanced diagnostics.** `ad-conversions:diagnose` now details counts and failure reasons for both retry-eligible `failed` conversions and permanently `rejected` conversions.
+
 ## v1.1.2 - 2026-09-08
 
 ### Fixed
-- **Pre-GBRAID/WBRAID databases no longer crash on sync.** Upgrading existing installations whose `leads` table only had `gclid` previously caused `SQLSTATE[42S22]: Column not found: 1054 Unknown column 'gbraid' in 'where clause'`. Table columns are now dynamically detected and memoized per process, so queries only reference existing columns, and click identifiers are safely mapped even before migrations are run.
-- **Added `add_gbraid_and_wbraid_to_leads_table` migration.** Allows existing applications to migrate their `leads` table to add dedicated `gbraid` and `wbraid` columns without modifying existing data.
-- **`ad-conversions:diagnose` warns when `gbraid`/`wbraid` columns are missing.**
+- **Pre-GBRAID/WBRAID databases no longer crash on sync.** Upgrading existing installations whose `leads` table only had a `NOT NULL` `gclid` column previously caused `SQLSTATE[42S22]: Column not found: 1054 Unknown column 'gbraid' in 'where clause'` or `SQLSTATE[23000]: Column 'gclid' cannot be null` on incoming GBRAID/WBRAID leads. Table columns and nullability are now dynamically detected and memoized per process, so queries and click persistence remain safe even before migrations are run.
+- **Added `add_gbraid_and_wbraid_to_leads_table` migration.** Allows existing applications to migrate their `leads` table to add dedicated `gbraid` and `wbraid` columns and alter `gclid` to `nullable()`, accommodating GBRAID/WBRAID leads without manual schema patches.
+- **`ad-conversions:diagnose` warns when `gbraid`/`wbraid` columns are missing or `gclid` is `NOT NULL`.**
 
 ## v1.0.0 - 2026-08-31
 

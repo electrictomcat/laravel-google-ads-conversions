@@ -273,7 +273,16 @@ it('uploads the accepted rows of a partially failed batch and retries only the r
     expect($count)->toBe(1);
 
     expect($accepted->fresh()->getConversions()[0]['status'])->toBe('uploaded')
-        ->and($rejected->fresh()->getConversions()[0]['status'])->toBe('failed');
+        ->and($rejected->fresh()->getConversions()[0]['status'])->toBe('failed')
+        ->and($rejected->fresh()->getConversions()[0]['retry_count'])->toBe(1);
+
+    // Second run: Google now accepts the retried conversion.
+    // The accepted lead is not re-uploaded; only the rejected lead is retried.
+    $uploader->stubbedResponse = new UploadClickConversionsResponse;
+    $count2 = $uploader->uploadPendingConversions(0, false);
+
+    expect($count2)->toBe(1)
+        ->and($rejected->fresh()->getConversions()[0]['status'])->toBe('uploaded');
 });
 
 it('treats the whole batch as unsent when the failure detail cannot be decoded', function () {

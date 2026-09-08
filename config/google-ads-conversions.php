@@ -42,6 +42,8 @@ return [
     'upload_delay_hours' => 6,
     'batch_size' => 2000,
     'retention_days' => 90,
+    'max_retries' => (int) env('GOOGLE_ADS_MAX_RETRIES', 5),
+    'retry_delay_hours' => (int) env('GOOGLE_ADS_RETRY_DELAY_HOURS', 1),
 
     /*
     |--------------------------------------------------------------------------
@@ -119,4 +121,22 @@ return [
     'default_value' => 0.0,
     'default_currency' => 'USD',
     'allow_unmapped_events' => true,
+
+    /*
+    |--------------------------------------------------------------------------
+    | Error & Rejection Alerts
+    |--------------------------------------------------------------------------
+    |
+    | Optional notification channels to notify developers or maintainers
+    | when conversions fail or are permanently rejected after max retries.
+    | Supports Slack/Discord/custom webhooks and email notifications.
+    |
+    */
+
+    'alerts' => [
+        'webhook_url' => env('GOOGLE_ADS_ALERT_WEBHOOK'),
+        'mail_to' => env('GOOGLE_ADS_ALERT_EMAIL'),
+        'alert_on_failure' => (bool) env('GOOGLE_ADS_ALERT_ON_FAILURE', false),
+        'alert_on_rejected' => (bool) env('GOOGLE_ADS_ALERT_ON_REJECTED', true),
+    ],
 ];

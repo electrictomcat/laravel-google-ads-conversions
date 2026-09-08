@@ -4,8 +4,10 @@ namespace ElectricTomCat\GoogleAdsConversions;
 
 use ElectricTomCat\GoogleAdsConversions\Contracts\HasConversions;
 use ElectricTomCat\GoogleAdsConversions\DTO\ConversionPayload;
+use ElectricTomCat\GoogleAdsConversions\Events\ConversionRejected;
 use ElectricTomCat\GoogleAdsConversions\Events\ConversionsUploaded;
 use ElectricTomCat\GoogleAdsConversions\Events\ConversionUploadFailed;
+use ElectricTomCat\GoogleAdsConversions\Mail\ConversionAlertMail;
 use ElectricTomCat\GoogleAdsConversions\Models\Lead;
 use ElectricTomCat\GoogleAdsConversions\Support\ClickIdentifier;
 use ElectricTomCat\GoogleAdsConversions\Support\ConsentManager;
@@ -22,7 +24,9 @@ use Google\Ads\GoogleAds\V23\Services\UploadClickConversionsRequest;
 use Google\Ads\GoogleAds\V23\Services\UploadClickConversionsResponse;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 /**
  * Talks to the Google Ads API: builds the SDK client, batches pending
@@ -30,6 +34,9 @@ use Illuminate\Support\Facades\Log;
  */
 class ConversionUploader
 {
+    /** Google keeps click data for 90 days; nothing older can be attributed. */
+    public const CLICK_RETENTION_DAYS = 90;
+
     protected ?GoogleAdsClient $client = null;
 
     public function __construct(
@@ -59,6 +66,9 @@ class ConversionUploader
     {
         $delayHours = $forceDelayHours ?? (int) config('google-ads-conversions.upload_delay_hours', 6);
         $threshold = now()->subHours($delayHours);
+        $retryDelayHours = $forceDelayHours !== null ? 0 : (int) config('google-ads-conversions.retry_delay_hours', 1);
+        $retryThreshold = now()->subHours($retryDelayHours);
+        $maxRetries = (int) config('google-ads-conversions.max_retries', 5);
         $batchSize = (int) config('google-ads-conversions.batch_size', 2000);
 
         $modelClass = $this->modelClass();
@@ -67,7 +77,7 @@ class ConversionUploader
 
         $modelClass::query()
             ->whereNotNull('conversions')
-            ->chunkById(100, function ($leads) use (&$batchItems, &$totalUploaded, $threshold, $batchSize, $validateOnly) {
+            ->chunkById(100, function ($leads) use (&$batchItems, &$totalUploaded, $threshold, $retryThreshold, $maxRetries, $batchSize, $validateOnly) {
                 foreach ($leads as $lead) {
                     // A custom model may not implement the contract; skip
                     // rather than fatal halfway through a sweep.
@@ -78,12 +88,52 @@ class ConversionUploader
                     $conversions = $lead->getConversions();
 
                     foreach ($conversions as $index => $conversion) {
-                        if (($conversion['status'] ?? '') !== 'pending') {
+                        $status = $conversion['status'] ?? '';
+
+                        if ($status !== 'pending' && $status !== 'failed') {
                             continue;
                         }
 
-                        if (($conversion['timestamp'] ?? 0) > $threshold->timestamp) {
+                        $timestamp = (int) ($conversion['timestamp'] ?? 0);
+
+                        // If the click is older than 90 days, Google refuses it permanently.
+                        // Mark as rejected to avoid wasting upload quota.
+                        if ($timestamp > 0 && now()->diffInDays(now()->setTimestamp($timestamp), true) > self::CLICK_RETENTION_DAYS) {
+                            if (! $validateOnly) {
+                                $this->markConversionRejected(
+                                    $lead,
+                                    $index,
+                                    $conversion,
+                                    'Click is older than '.self::CLICK_RETENTION_DAYS.' days and can never be attributed.'
+                                );
+                            }
+
                             continue;
+                        }
+
+                        if ($status === 'pending') {
+                            if ($timestamp > $threshold->timestamp) {
+                                continue;
+                            }
+                        } elseif ($status === 'failed') {
+                            $retryCount = (int) ($conversion['retry_count'] ?? 0);
+                            if ($retryCount >= $maxRetries) {
+                                if (! $validateOnly) {
+                                    $this->markConversionRejected(
+                                        $lead,
+                                        $index,
+                                        $conversion,
+                                        "Exceeded maximum retries ({$maxRetries})."
+                                    );
+                                }
+
+                                continue;
+                            }
+
+                            $failedAt = (int) ($conversion['failed_at'] ?? 0);
+                            if ($failedAt > $retryThreshold->timestamp) {
+                                continue;
+                            }
                         }
 
                         $action = $this->events->action($conversion['event']);
@@ -453,14 +503,26 @@ class ConversionUploader
                 $clickId = $this->clickIdFor($lead);
 
                 if (array_key_exists($i, $rejected)) {
-                    // Google refused this row. Leave it pending so the next run
-                    // retries it, and record why on the entry so the dashboard
-                    // and the failure event can surface it.
-                    $leadsMap[$leadId]['conversions'][$index]['status'] = 'failed';
-                    $leadsMap[$leadId]['conversions'][$index]['failed_at'] = now()->timestamp;
-                    $leadsMap[$leadId]['conversions'][$index]['error'] = $rejected[$i];
+                    $retryCount = ((int) ($item['conversion']['retry_count'] ?? 0)) + 1;
+                    $maxRetries = (int) config('google-ads-conversions.max_retries', 5);
+                    $errorMessage = $rejected[$i];
 
-                    ConversionUploadFailed::dispatch($clickId, $rejected[$i], $item['conversion']);
+                    $leadsMap[$leadId]['conversions'][$index]['retry_count'] = $retryCount;
+                    $leadsMap[$leadId]['conversions'][$index]['error'] = $errorMessage;
+
+                    if ($retryCount >= $maxRetries) {
+                        $leadsMap[$leadId]['conversions'][$index]['status'] = 'rejected';
+                        $leadsMap[$leadId]['conversions'][$index]['rejected_at'] = now()->timestamp;
+
+                        ConversionRejected::dispatch($clickId, $errorMessage, $leadsMap[$leadId]['conversions'][$index], $retryCount);
+                        $this->sendAlert('rejected', $clickId, $errorMessage, $leadsMap[$leadId]['conversions'][$index], $retryCount);
+                    } else {
+                        $leadsMap[$leadId]['conversions'][$index]['status'] = 'failed';
+                        $leadsMap[$leadId]['conversions'][$index]['failed_at'] = now()->timestamp;
+
+                        ConversionUploadFailed::dispatch($clickId, $errorMessage, $leadsMap[$leadId]['conversions'][$index]);
+                        $this->sendAlert('failed', $clickId, $errorMessage, $leadsMap[$leadId]['conversions'][$index], $retryCount);
+                    }
 
                     continue;
                 }
@@ -820,5 +882,112 @@ class ConversionUploader
     protected function modelClass(): string
     {
         return config('google-ads-conversions.model', Lead::class);
+    }
+
+    /**
+     * Mark a conversion as permanently rejected and trigger events and alerts.
+     *
+     * @param  HasConversions&Model  $lead
+     * @param  array<string, mixed>  $conversion
+     */
+    protected function markConversionRejected(
+        HasConversions $lead,
+        int $index,
+        array $conversion,
+        string $reason
+    ): void {
+        $conversions = $lead->getConversions()->toArray();
+
+        if (isset($conversions[$index])) {
+            $retryCount = (int) ($conversions[$index]['retry_count'] ?? 0);
+
+            $conversions[$index]['status'] = 'rejected';
+            $conversions[$index]['rejected_at'] = now()->timestamp;
+            $conversions[$index]['error'] = $reason;
+
+            $lead->setConversions($conversions);
+            $lead->persist();
+
+            $clickId = $this->clickIdFor($lead);
+
+            ConversionRejected::dispatch($clickId, $reason, $conversions[$index], $retryCount);
+            $this->sendAlert('rejected', $clickId, $reason, $conversions[$index], $retryCount);
+        }
+    }
+
+    /**
+     * Send configured alert notifications (webhook, email) when conversions fail or are rejected.
+     *
+     * @param  'failed'|'rejected'  $type
+     * @param  array<string, mixed>  $conversion
+     */
+    protected function sendAlert(string $type, string $clickId, string $errorMessage, array $conversion, int $retryCount = 0): void
+    {
+        $alertConfig = (array) config('google-ads-conversions.alerts', []);
+
+        $shouldAlert = match ($type) {
+            'rejected' => (bool) ($alertConfig['alert_on_rejected'] ?? true),
+            'failed' => (bool) ($alertConfig['alert_on_failure'] ?? false),
+        };
+
+        if (! $shouldAlert) {
+            return;
+        }
+
+        $eventName = (string) ($conversion['event'] ?? 'Unknown Event');
+        $customerId = $this->customerId();
+
+        $payload = [
+            'type' => $type,
+            'event' => $eventName,
+            'click_id' => $clickId,
+            'error' => $errorMessage,
+            'retry_count' => $retryCount,
+            'customer_id' => $customerId,
+            'timestamp' => now()->toIso8601String(),
+        ];
+
+        // 1. Webhook notification (Slack, Discord, or custom HTTP endpoint)
+        $webhookUrl = $alertConfig['webhook_url'] ?? null;
+        if (is_string($webhookUrl) && $webhookUrl !== '') {
+            try {
+                if (str_contains($webhookUrl, 'hooks.slack.com') || str_contains($webhookUrl, 'discord.com/api/webhooks')) {
+                    $color = $type === 'rejected' ? '#E53E3E' : '#DD6B20';
+                    $title = $type === 'rejected'
+                        ? "🚨 Google Ads Conversion Rejected ({$eventName})"
+                        : "⚠️ Google Ads Conversion Upload Failed ({$eventName})";
+
+                    Http::timeout(5)->post($webhookUrl, [
+                        'text' => "{$title}: {$errorMessage} (Click: {$clickId}, Attempt: {$retryCount})",
+                        'attachments' => [[
+                            'color' => $color,
+                            'title' => $title,
+                            'fields' => [
+                                ['title' => 'Event', 'value' => $eventName, 'short' => true],
+                                ['title' => 'Customer ID', 'value' => $customerId, 'short' => true],
+                                ['title' => 'Click ID', 'value' => $clickId, 'short' => true],
+                                ['title' => 'Attempt', 'value' => (string) $retryCount, 'short' => true],
+                                ['title' => 'Error', 'value' => $errorMessage, 'short' => false],
+                            ],
+                            'ts' => now()->timestamp,
+                        ]],
+                    ]);
+                } else {
+                    Http::timeout(5)->post($webhookUrl, $payload);
+                }
+            } catch (\Throwable $e) {
+                Log::warning("[GoogleAdsConversions] Failed to deliver alert webhook: {$e->getMessage()}");
+            }
+        }
+
+        // 2. Email notification
+        $mailTo = $alertConfig['mail_to'] ?? null;
+        if (is_string($mailTo) && $mailTo !== '') {
+            try {
+                Mail::to($mailTo)->send(new ConversionAlertMail($type, $eventName, $clickId, $errorMessage, $retryCount, $customerId));
+            } catch (\Throwable $e) {
+                Log::warning("[GoogleAdsConversions] Failed to send alert email: {$e->getMessage()}");
+            }
+        }
     }
 }
