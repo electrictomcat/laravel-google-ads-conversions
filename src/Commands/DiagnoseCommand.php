@@ -4,6 +4,7 @@ namespace ElectricTomCat\GoogleAdsConversions\Commands;
 
 use ElectricTomCat\GoogleAdsConversions\Contracts\HasConversions;
 use ElectricTomCat\GoogleAdsConversions\ConversionUploader;
+use ElectricTomCat\GoogleAdsConversions\GoogleAdsConversions;
 use ElectricTomCat\GoogleAdsConversions\Models\Lead;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Model;
@@ -25,13 +26,13 @@ class DiagnoseCommand extends Command
     /** Google keeps click data for 90 days; nothing older can be attributed. */
     protected const CLICK_RETENTION_DAYS = 90;
 
-    public function handle(ConversionUploader $uploader): int
+    public function handle(ConversionUploader $uploader, GoogleAdsConversions $tracker): int
     {
         $this->components->info('OmniSignal attribution diagnostics');
 
         $problems = 0;
         $problems += $this->reportGoogleDiagnostics($uploader);
-        $problems += $this->reportLocalData();
+        $problems += $this->reportLocalData($tracker);
         $problems += $this->reportConfiguration();
 
         $this->newLine();
@@ -108,7 +109,7 @@ class DiagnoseCommand extends Command
     /**
      * Shapes in our own data that Google will refuse, or that never reach it.
      */
-    protected function reportLocalData(): int
+    protected function reportLocalData(GoogleAdsConversions $tracker): int
     {
         $this->newLine();
         $this->components->info('Our own data');
@@ -129,11 +130,28 @@ class DiagnoseCommand extends Command
 
         $problems = 0;
 
+        $hasGclid = $tracker->modelHasColumn('gclid');
+        $hasGbraid = $tracker->modelHasColumn('gbraid');
+        $hasWbraid = $tracker->modelHasColumn('wbraid');
+
+        if (! $hasGbraid || ! $hasWbraid) {
+            $this->line('  <fg=yellow>Table is missing gbraid/wbraid columns.</>');
+            $this->line('    <fg=gray>Run `php artisan vendor:publish --tag=laravel-google-ads-conversions-migrations` and `php artisan migrate` to enable iOS ATT click attribution.</>');
+            $problems++;
+        }
+
         // Leads with no click identifier at all cannot be attributed.
-        $unattributable = $modelClass::query()
-            ->where('created_at', '>=', $since)
-            ->whereNull('gclid')->whereNull('gbraid')->whereNull('wbraid')
-            ->count();
+        $unattributableQuery = $modelClass::query()->where('created_at', '>=', $since);
+        if ($hasGclid) {
+            $unattributableQuery->whereNull('gclid');
+        }
+        if ($hasGbraid) {
+            $unattributableQuery->whereNull('gbraid');
+        }
+        if ($hasWbraid) {
+            $unattributableQuery->whereNull('wbraid');
+        }
+        $unattributable = ($hasGclid || $hasGbraid || $hasWbraid) ? $unattributableQuery->count() : $total;
 
         $rate = round(($total - $unattributable) / $total * 100, 1);
         $this->line('  Leads with a click identifier: <fg='.($rate < 50 ? 'yellow' : 'green').">{$rate}%</> ({$total} leads)");
@@ -145,11 +163,14 @@ class DiagnoseCommand extends Command
         }
 
         // Braid values sitting in the gclid column - Google refuses these.
-        $misfiled = $modelClass::query()
-            ->where('created_at', '>=', $since)
-            ->whereNotNull('gclid')
-            ->where('gclid', 'like', '0AAAAA%')
-            ->count();
+        $misfiled = 0;
+        if ($hasGclid) {
+            $misfiled = $modelClass::query()
+                ->where('created_at', '>=', $since)
+                ->whereNotNull('gclid')
+                ->where('gclid', 'like', '0AAAAA%')
+                ->count();
+        }
 
         if ($misfiled > 0) {
             $this->line("  <fg=red>{$misfiled} lead(s) have a gbraid/wbraid stored in the gclid column.</>");

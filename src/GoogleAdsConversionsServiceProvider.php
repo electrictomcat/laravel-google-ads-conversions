@@ -23,7 +23,10 @@ class GoogleAdsConversionsServiceProvider extends PackageServiceProvider
         $package
             ->name('laravel-google-ads-conversions')
             ->hasConfigFile()
-            ->hasMigration('create_leads_table')
+            ->hasMigrations([
+                'create_leads_table',
+                'add_gbraid_and_wbraid_to_leads_table',
+            ])
             ->hasCommands([
                 InstallCommand::class,
                 UploadConversionsCommand::class,
