@@ -185,6 +185,7 @@ class GoogleAdsConversions
         $this->wbraidMemoized = false;
         $this->visitorHistory = null;
         $this->visitorHistoryLoaded = false;
+        self::flushColumnCache();
     }
 
     /**
@@ -443,21 +444,46 @@ class GoogleAdsConversions
         $modelClass = $this->modelClass();
         $isVisitorKey = str_starts_with($clickId, self::VISITOR_KEY_PREFIX);
 
+        $hasGclid = $this->modelHasColumn('gclid');
+        $hasGbraid = $this->modelHasColumn('gbraid');
+        $hasWbraid = $this->modelHasColumn('wbraid');
+
         /** @var (HasConversions&Model)|null $lead */
-        $lead = $isVisitorKey
-            ? $modelClass::query()
+        $lead = null;
+
+        if ($isVisitorKey) {
+            $lead = $modelClass::query()
                 ->where('visitor_id', substr($clickId, strlen(self::VISITOR_KEY_PREFIX)))
                 ->latest()
-                ->first()
-            : $modelClass::query()
+                ->first();
+        } else {
+            $lead = $modelClass::query()
                 // Grouped so a global scope (SoftDeletes, tenancy) is not
                 // escaped by the trailing OR conditions.
-                ->where(function ($query) use ($clickId) {
-                    $query->where('gclid', $clickId)
-                        ->orWhere('gbraid', $clickId)
-                        ->orWhere('wbraid', $clickId);
+                ->where(function ($query) use ($clickId, $hasGclid, $hasGbraid, $hasWbraid) {
+                    $hasClause = false;
+
+                    if ($hasGclid) {
+                        $query->where('gclid', $clickId);
+                        $hasClause = true;
+                    }
+
+                    if ($hasGbraid) {
+                        $hasClause ? $query->orWhere('gbraid', $clickId) : $query->where('gbraid', $clickId);
+                        $hasClause = true;
+                    }
+
+                    if ($hasWbraid) {
+                        $hasClause ? $query->orWhere('wbraid', $clickId) : $query->where('wbraid', $clickId);
+                        $hasClause = true;
+                    }
+
+                    if (! $hasClause) {
+                        $query->whereRaw('0 = 1');
+                    }
                 })
                 ->first();
+        }
 
         if (! $lead) {
             $lead = new $modelClass;
@@ -465,15 +491,26 @@ class GoogleAdsConversions
             if ($isVisitorKey) {
                 $lead->setVisitorId(substr($clickId, strlen(self::VISITOR_KEY_PREFIX)));
             } else {
-                match ($this->identifierTypeFor($clickId, $leadData, $cached)) {
-                    ClickIdentifier::GBRAID => $lead->setGbraid($clickId),
-                    ClickIdentifier::WBRAID => $lead->setWbraid($clickId),
+                $identifierType = $this->identifierTypeFor($clickId, $leadData, $cached);
+
+                match ($identifierType) {
+                    ClickIdentifier::GBRAID => $hasGbraid ? $lead->setGbraid($clickId) : $lead->setGclid($clickId),
+                    ClickIdentifier::WBRAID => $hasWbraid ? $lead->setWbraid($clickId) : $lead->setGclid($clickId),
                     default => $lead->setGclid($clickId),
                 };
             }
         }
 
+        assert($lead instanceof HasConversions);
+
         if ($leadData) {
+            if (! $hasGbraid) {
+                unset($leadData['gbraid']);
+            }
+            if (! $hasWbraid) {
+                unset($leadData['wbraid']);
+            }
+
             $lead->fillTrackingData($leadData);
         }
 
@@ -609,13 +646,34 @@ class GoogleAdsConversions
             return $this->visitorHistory;
         }
 
+        $hasGclid = $this->modelHasColumn('gclid');
+        $hasGbraid = $this->modelHasColumn('gbraid');
+        $hasWbraid = $this->modelHasColumn('wbraid');
+
+        if (! $hasGclid && ! $hasGbraid && ! $hasWbraid) {
+            return $this->visitorHistory;
+        }
+
         /** @var (HasConversions&Model)|null $lead */
         $lead = $this->modelClass()::query()
             ->where('visitor_id', $visitorId)
-            ->where(function ($query) {
-                $query->whereNotNull('gclid')
-                    ->orWhereNotNull('gbraid')
-                    ->orWhereNotNull('wbraid');
+            ->where(function ($query) use ($hasGclid, $hasGbraid, $hasWbraid) {
+                $hasClause = false;
+
+                if ($hasGclid) {
+                    $query->whereNotNull('gclid');
+                    $hasClause = true;
+                }
+
+                if ($hasGbraid) {
+                    $hasClause ? $query->orWhereNotNull('gbraid') : $query->whereNotNull('gbraid');
+                    $hasClause = true;
+                }
+
+                if ($hasWbraid) {
+                    $hasClause ? $query->orWhereNotNull('wbraid') : $query->whereNotNull('wbraid');
+                    $hasClause = true;
+                }
             })
             ->latest()
             ->first();
@@ -721,6 +779,52 @@ class GoogleAdsConversions
             Log::warning("[GoogleAdsConversions] Timed out waiting on buffer lock for '{$key}'; writing unguarded.");
             $apply();
         }
+    }
+
+    /**
+     * In-memory cache of table columns keyed by connection and table name.
+     *
+     * @var array<string, array<string, bool>>
+     */
+    protected static array $columnCache = [];
+
+    /**
+     * Check whether a column exists on the model's table.
+     *
+     * Memoized in-memory per connection/table so each sync or request only
+     * queries the schema at most once, and missing columns (e.g. gbraid/wbraid
+     * in pre-v1.0 databases) don't crash queries.
+     */
+    public function modelHasColumn(string $column): bool
+    {
+        /** @var Model $model */
+        $model = app($this->modelClass());
+        $connection = $model->getConnection();
+        $table = $model->getTable();
+        $cacheKey = $connection->getName().':'.$table;
+
+        if (! isset(self::$columnCache[$cacheKey])) {
+            self::$columnCache[$cacheKey] = [];
+
+            try {
+                $columns = $connection->getSchemaBuilder()->getColumnListing($table);
+                foreach ($columns as $col) {
+                    self::$columnCache[$cacheKey][strtolower($col)] = true;
+                }
+            } catch (\Throwable) {
+                // Ignore schema lookup errors and treat as not having column
+            }
+        }
+
+        return self::$columnCache[$cacheKey][strtolower($column)] ?? false;
+    }
+
+    /**
+     * Flush the column listing cache. Useful in tests or after dynamic migrations.
+     */
+    public static function flushColumnCache(): void
+    {
+        self::$columnCache = [];
     }
 
     /**

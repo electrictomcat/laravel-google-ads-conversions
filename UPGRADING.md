@@ -138,3 +138,14 @@ that constant directly, use `pendingClickIds()` instead.
 `resources/views/landing.blade.php` and `docs.blade.php` no longer ship with the
 package. If you were rendering `google-ads-conversions::landing`, copy the file
 from v0.2.0 into your own application's views.
+
+### 12. Run the migration to add GBRAID and WBRAID columns
+
+If you upgraded from a version that predates GBRAID and WBRAID support (where the `leads` table only had `gclid`), publish and run the additive migration to create the `gbraid` and `wbraid` columns for iOS ATT ad tracking:
+
+```bash
+php artisan vendor:publish --tag="laravel-google-ads-conversions-migrations"
+php artisan migrate
+```
+
+The package dynamically detects available columns and safely attributes even before the migration is run, but running this migration ensures iOS ATT clicks are stored in dedicated columns.

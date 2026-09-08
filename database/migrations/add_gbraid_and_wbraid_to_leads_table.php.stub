@@ -1,0 +1,46 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        $tableName = config('google-ads-conversions.table', 'leads');
+
+        if (! Schema::hasTable($tableName)) {
+            return;
+        }
+
+        Schema::table($tableName, function (Blueprint $table) use ($tableName) {
+            if (! Schema::hasColumn($tableName, 'gbraid')) {
+                $table->string('gbraid')->nullable()->index();
+            }
+            if (! Schema::hasColumn($tableName, 'wbraid')) {
+                $table->string('wbraid')->nullable()->index();
+            }
+        });
+    }
+
+    public function down(): void
+    {
+        $tableName = config('google-ads-conversions.table', 'leads');
+
+        if (! Schema::hasTable($tableName)) {
+            return;
+        }
+
+        Schema::table($tableName, function (Blueprint $table) use ($tableName) {
+            if (Schema::hasColumn($tableName, 'gbraid')) {
+                $table->dropIndex(['gbraid']);
+                $table->dropColumn('gbraid');
+            }
+            if (Schema::hasColumn($tableName, 'wbraid')) {
+                $table->dropIndex(['wbraid']);
+                $table->dropColumn('wbraid');
+            }
+        });
+    }
+};
