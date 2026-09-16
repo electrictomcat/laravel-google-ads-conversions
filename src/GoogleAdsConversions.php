@@ -173,6 +173,32 @@ class GoogleAdsConversions
     }
 
     /**
+     * Whether the current visitor has any click attribution (GCLID, GBRAID, WBRAID, or visitor history).
+     */
+    public function hasAttribution(): bool
+    {
+        return $this->clickIdentifier() !== null;
+    }
+
+    /**
+     * All cookie names used by the package that should be exempt from encryption
+     * so client-side scripts can read them.
+     *
+     * @return array<int, string>
+     */
+    public static function cookieNames(): array
+    {
+        $cookies = (array) config('google-ads-conversions.cookies', []);
+
+        return array_values(array_filter([
+            $cookies['gclid'] ?? 'google_ads_gclid',
+            $cookies['gbraid'] ?? 'google_ads_gbraid',
+            $cookies['wbraid'] ?? 'google_ads_wbraid',
+            $cookies['visitor_id'] ?? 'google_ads_visitor_id',
+        ]));
+    }
+
+    /**
      * Discard memoized click identifiers. Useful in tests and long-running workers.
      */
     public function forgetGclid(): void

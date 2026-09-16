@@ -4,6 +4,7 @@ namespace ElectricTomCat\GoogleAdsConversions\Testing;
 
 use Closure;
 use DateTimeInterface;
+use ElectricTomCat\GoogleAdsConversions\Support\ClickIdentifier;
 use PHPUnit\Framework\Assert as PHPUnit;
 
 class GoogleAdsConversionsFake
@@ -88,6 +89,28 @@ class GoogleAdsConversionsFake
     public function clickId(): ?string
     {
         return $this->gclid() ?? $this->gbraid() ?? $this->wbraid();
+    }
+
+    public function clickIdentifier(): ?ClickIdentifier
+    {
+        if ($this->fakeGclid) {
+            return ClickIdentifier::gclid($this->fakeGclid);
+        }
+
+        if ($this->fakeGbraid) {
+            return ClickIdentifier::gbraid($this->fakeGbraid);
+        }
+
+        if ($this->fakeWbraid) {
+            return ClickIdentifier::wbraid($this->fakeWbraid);
+        }
+
+        return null;
+    }
+
+    public function hasAttribution(): bool
+    {
+        return $this->clickIdentifier() !== null;
     }
 
     public function forgetGclid(): void

@@ -64,6 +64,17 @@ class GoogleAdsConversionsServiceProvider extends PackageServiceProvider
             /** @var Router $router */
             $router = $this->app->make(Router::class);
             $router->aliasMiddleware('capture-gclid', CaptureGclid::class);
+
+            if (config('google-ads-conversions.routes.enabled', true)) {
+                $prefix = (string) config('google-ads-conversions.routes.prefix', 'api/google-ads');
+                $middleware = (array) config('google-ads-conversions.routes.middleware', ['api']);
+                $path = (string) config('google-ads-conversions.routes.track_conversion_path', 'track-conversion');
+
+                $router->group(['prefix' => $prefix, 'middleware' => $middleware], function (Router $router) use ($path) {
+                    $router->post($path, Http\Controllers\TrackConversionController::class)
+                        ->name('google-ads-conversions.track');
+                });
+            }
         }
 
         if ($this->app->runningInConsole()) {
@@ -96,6 +107,124 @@ class GoogleAdsConversionsServiceProvider extends PackageServiceProvider
                     echo \'<input type="hidden" name="gclid" value="\'.e($gclid).\'">\';
                 }
             ?>';
+        });
+
+        Blade::directive('googleAdsScript', function () {
+            return '<script data-navigate-once>
+(function() {
+    function getClickData() {
+        var cookies = document.cookie.split("; ");
+        var gclid = (cookies.find(function(r) { return r.startsWith("google_ads_gclid="); }) || "").split("=")[1];
+        var gbraid = (cookies.find(function(r) { return r.startsWith("google_ads_gbraid="); }) || "").split("=")[1];
+        var wbraid = (cookies.find(function(r) { return r.startsWith("google_ads_wbraid="); }) || "").split("=")[1];
+        return { gclid: gclid, gbraid: gbraid, wbraid: wbraid };
+    }
+    window.trackGoogleAdsConversion = function(eventName, value, currency, orderId) {
+        var data = getClickData();
+        var endpoint = <?php echo json_encode(
+            \Illuminate\Support\Facades\Route::has("google-ads-conversions.track")
+                ? route("google-ads-conversions.track")
+                : url(config("google-ads-conversions.routes.prefix", "api/google-ads")."/".config("google-ads-conversions.routes.track_conversion_path", "track-conversion"))
+        ); ?>;
+        var payload = {
+            event: eventName,
+            gclid: data.gclid || undefined,
+            gbraid: data.gbraid || undefined,
+            wbraid: data.wbraid || undefined
+        };
+        if (value !== undefined && value !== null) {
+            payload.value = value;
+        }
+        if (currency) {
+            payload.currency = currency;
+        }
+        if (orderId) {
+            payload.order_id = orderId;
+        }
+        var jsonPayload = JSON.stringify(payload);
+        if (navigator.sendBeacon) {
+            var blob = new Blob([jsonPayload], { type: "application/json" });
+            navigator.sendBeacon(endpoint, blob);
+        } else {
+            fetch(endpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: jsonPayload,
+                keepalive: true
+            }).catch(function() {});
+        }
+    };
+})();
+</script>';
+        });
+
+        Blade::directive('googleAdsNavigationTracking', function () {
+            return '<?php if (\ElectricTomCat\GoogleAdsConversions\Facades\GoogleAdsConversions::hasAttribution()): ?>
+<script data-navigate-once>
+(function() {
+    function getClickData() {
+        var cookies = document.cookie.split("; ");
+        var gclid = (cookies.find(function(r) { return r.startsWith("google_ads_gclid="); }) || "").split("=")[1];
+        var gbraid = (cookies.find(function(r) { return r.startsWith("google_ads_gbraid="); }) || "").split("=")[1];
+        var wbraid = (cookies.find(function(r) { return r.startsWith("google_ads_wbraid="); }) || "").split("=")[1];
+        return { gclid: gclid, gbraid: gbraid, wbraid: wbraid };
+    }
+    function sendNavigationEvent() {
+        var data = getClickData();
+        if (!data.gclid && !data.gbraid && !data.wbraid) return;
+        var endpoint = <?php echo json_encode(
+            \Illuminate\Support\Facades\Route::has("google-ads-conversions.track")
+                ? route("google-ads-conversions.track")
+                : url(config("google-ads-conversions.routes.prefix", "api/google-ads")."/".config("google-ads-conversions.routes.track_conversion_path", "track-conversion"))
+        ); ?>;
+        var payload = JSON.stringify({
+            event: "Page Navigation: " + window.location.pathname,
+            value: 1,
+            currency: "USD",
+            gclid: data.gclid || undefined,
+            gbraid: data.gbraid || undefined,
+            wbraid: data.wbraid || undefined
+        });
+        if (navigator.sendBeacon) {
+            var blob = new Blob([payload], { type: "application/json" });
+            navigator.sendBeacon(endpoint, blob);
+        } else {
+            fetch(endpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: payload,
+                keepalive: true
+            }).catch(function() {});
+        }
+    }
+    // 1. Real Page Loads (Forward navigation only)
+    function onInitialLoad() {
+        var navEntry = performance.getEntriesByType("navigation")[0];
+        var isBackForward = navEntry && navEntry.type === "back_forward";
+        var isSameSite = document.referrer && new URL(document.referrer).origin === window.location.origin;
+        if (isSameSite && !isBackForward) {
+            sendNavigationEvent();
+        }
+    }
+    if (document.readyState === "complete") {
+        onInitialLoad();
+    } else {
+        window.addEventListener("load", onInitialLoad);
+    }
+    // 2. SPA Navigations (Livewire wire:navigate, Turbo, Inertia)
+    var lastPath = window.location.pathname;
+    var onSpaNavigate = function() {
+        if (window.location.pathname !== lastPath) {
+            lastPath = window.location.pathname;
+            sendNavigationEvent();
+        }
+    };
+    document.addEventListener("livewire:navigated", onSpaNavigate);
+    document.addEventListener("turbo:load", onSpaNavigate);
+    document.addEventListener("inertia:navigate", onSpaNavigate);
+})();
+</script>
+<?php endif; ?>';
         });
     }
 }
