@@ -139,4 +139,17 @@ return [
         'alert_on_failure' => (bool) env('GOOGLE_ADS_ALERT_ON_FAILURE', false),
         'alert_on_rejected' => (bool) env('GOOGLE_ADS_ALERT_ON_REJECTED', true),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Route Configuration
+    |--------------------------------------------------------------------------
+    */
+
+    'routes' => [
+        'enabled' => true,
+        'prefix' => 'api/google-ads',
+        'middleware' => ['api'],
+        'track_conversion_path' => 'track-conversion',
+    ],
 ];

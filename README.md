@@ -61,19 +61,25 @@ GOOGLE_ADS_CUSTOMER_ID="1234567890" # without hyphens
 
 ## Usage
 
-### 1. Register the Click Capture Middleware
+### 1. Register the Click Capture Middleware & Exempt Cookies
 
-Add the middleware to your `bootstrap/app.php` (Laravel 11+):
+In your `bootstrap/app.php` (Laravel 11+), register the middleware and exempt the package's attribution cookies from encryption so client-side JavaScript can read them:
 
 ```php
+use ElectricTomCat\GoogleAdsConversions\GoogleAdsConversions;
+use ElectricTomCat\GoogleAdsConversions\Http\Middleware\CaptureGclid;
+
 ->withMiddleware(function (Middleware $middleware) {
+    // Allow client-side scripts to read attribution cookies
+    $middleware->encryptCookies(except: GoogleAdsConversions::cookieNames());
+
     $middleware->web(append: [
-        \ElectricTomCat\GoogleAdsConversions\Http\Middleware\CaptureGclid::class,
+        CaptureGclid::class,
     ]);
 })
 ```
 
-### 2. Record a Conversion Event
+### 2. Record a Conversion Event (Server-Side)
 
 ```php
 use ElectricTomCat\GoogleAdsConversions\Facades\GoogleAdsConversions;
@@ -97,9 +103,34 @@ GoogleAdsConversions::record(
 );
 ```
 
-### 3. Blade Directive for HTML Forms
+### 3. Client-Side JavaScript Tracking
 
-Inject hidden click identifiers into your contact or checkout forms:
+Add the `@googleAdsScript` directive to your layout (e.g. before `</head>` or `</body>`):
+
+```blade
+@googleAdsScript
+```
+
+This injects the global `window.trackGoogleAdsConversion(eventName, value, currency, orderId)` helper. It inspects client cookies (`google_ads_gclid`, `google_ads_gbraid`, `google_ads_wbraid`) and dispatches the conversion via `navigator.sendBeacon` (falling back to `fetch`) to the package's built-in endpoint:
+
+```javascript
+// Trigger a conversion from any frontend interaction or button click
+window.trackGoogleAdsConversion('Add to Cart', 49.99, 'USD');
+```
+
+### 4. Navigation Micro-Conversions (Full-Page & SPA)
+
+Track forward page navigation micro-conversions for ad-attributed visitors across full-page loads and SPA transitions (Livewire `wire:navigate`, Turbo, Inertia):
+
+```blade
+@googleAdsNavigationTracking
+```
+
+This directive only renders if the visitor has an active ad attribution (`GoogleAdsConversions::hasAttribution()`). It automatically posts navigation events (`Page Navigation: /path`) when visitors navigate forward.
+
+### 5. Blade Directive for HTML Forms
+
+Inject hidden click identifiers (`gclid`, `gbraid`, `wbraid`) into your contact or checkout forms:
 
 ```html
 <form action="/contact" method="POST">
@@ -111,7 +142,20 @@ Inject hidden click identifiers into your contact or checkout forms:
 </form>
 ```
 
-### 4. Testing with `fake()`
+### 6. Built-In Route Configuration
+
+The package automatically exposes a route for client-side conversions (`POST /api/google-ads/track-conversion`, named `google-ads-conversions.track`). You can customize the route in `config/google-ads-conversions.php`:
+
+```php
+'routes' => [
+    'enabled' => true,
+    'prefix' => 'api/google-ads',
+    'middleware' => ['api'],
+    'track_conversion_path' => 'track-conversion',
+],
+```
+
+### 7. Testing with `fake()`
 
 ```php
 use ElectricTomCat\GoogleAdsConversions\Facades\GoogleAdsConversions;
