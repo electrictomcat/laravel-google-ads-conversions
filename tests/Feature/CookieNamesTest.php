@@ -24,3 +24,17 @@ test('test_cookie_names_returns_all_configured_cookie_keys', function () {
         'custom_visitor_id',
     ]);
 });
+
+test('test_cookie_names_returns_defaults_when_config_is_not_bound', function () {
+    $container = new \Illuminate\Container\Container;
+    \Illuminate\Container\Container::setInstance($container);
+
+    expect(GoogleAdsConversions::cookieNames())->toBe([
+        'google_ads_gclid',
+        'google_ads_gbraid',
+        'google_ads_wbraid',
+        'google_ads_visitor_id',
+    ]);
+
+    \Illuminate\Container\Container::setInstance($this->app);
+});

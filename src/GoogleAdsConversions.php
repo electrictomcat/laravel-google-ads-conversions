@@ -188,7 +188,10 @@ class GoogleAdsConversions
      */
     public static function cookieNames(): array
     {
-        $cookies = (array) config('google-ads-conversions.cookies', []);
+        $cookies = [];
+        if (\Illuminate\Container\Container::getInstance()?->bound('config')) {
+            $cookies = (array) config('google-ads-conversions.cookies', []);
+        }
 
         return array_values(array_filter([
             $cookies['gclid'] ?? 'google_ads_gclid',
