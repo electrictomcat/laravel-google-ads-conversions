@@ -31,11 +31,20 @@ Requires **PHP 8.3+** and **Laravel 11, 12, or 13**.
 composer require electrictomcat/laravel-google-ads-conversions
 ```
 
-Publish configuration and database migration:
+Publish configuration, database migrations, and run the interactive Google Ads OAuth & `.env` setup wizard:
 
 ```bash
 php artisan google-ads:install
 ```
+
+The installer will:
+1. Publish the config file and migrations.
+2. Prompt for your Google Cloud OAuth Client ID & Secret and generate a **Google OAuth 2.0 authorization link** (`adwords` scope).
+3. Exchange your authorization code (or use `--listen` to capture the local browser callback automatically) for a `GOOGLE_ADS_REFRESH_TOKEN`.
+4. Guide you to retrieve your `GOOGLE_ADS_DEVELOPER_TOKEN` and auto-discover your accessible `GOOGLE_ADS_CUSTOMER_ID`s.
+5. Inject the `# Google Ads Offline Conversions` credential section directly into your `.env` file.
+
+> 💡 You can re-run the credential setup wizard at any time with `php artisan google-ads:install --setup` (or `php artisan google-ads:install --setup --listen` to capture the browser callback automatically on `http://127.0.0.1:8085`).
 
 Run migrations:
 
@@ -47,14 +56,16 @@ php artisan migrate
 
 ## Configuration
 
-Add your Google Ads API credentials to your `.env` file:
+If you prefer to configure your `.env` file manually, add the following section:
 
 ```ini
+# Google Ads Offline Conversions
 GOOGLE_ADS_DEVELOPER_TOKEN="your-developer-token"
 GOOGLE_ADS_CLIENT_ID="your-client-id.apps.googleusercontent.com"
 GOOGLE_ADS_CLIENT_SECRET="your-client-secret"
 GOOGLE_ADS_REFRESH_TOKEN="your-refresh-token"
 GOOGLE_ADS_CUSTOMER_ID="1234567890" # without hyphens
+GOOGLE_ADS_LOGIN_CUSTOMER_ID=""      # optional Manager (MCC) account ID
 ```
 
 ---

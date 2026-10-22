@@ -1,6 +1,7 @@
 <?php
 
 use ElectricTomCat\GoogleAdsConversions\GoogleAdsConversions;
+use Illuminate\Container\Container;
 
 test('test_cookie_names_returns_all_configured_cookie_keys', function () {
     expect(GoogleAdsConversions::cookieNames())->toBe([
@@ -26,8 +27,8 @@ test('test_cookie_names_returns_all_configured_cookie_keys', function () {
 });
 
 test('test_cookie_names_returns_defaults_when_config_is_not_bound', function () {
-    $container = new \Illuminate\Container\Container;
-    \Illuminate\Container\Container::setInstance($container);
+    $container = new Container;
+    Container::setInstance($container);
 
     expect(GoogleAdsConversions::cookieNames())->toBe([
         'google_ads_gclid',
@@ -36,5 +37,5 @@ test('test_cookie_names_returns_defaults_when_config_is_not_bound', function () 
         'google_ads_visitor_id',
     ]);
 
-    \Illuminate\Container\Container::setInstance($this->app);
+    Container::setInstance($this->app);
 });

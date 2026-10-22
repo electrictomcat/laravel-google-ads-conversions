@@ -10,6 +10,7 @@ use ElectricTomCat\GoogleAdsConversions\Commands\UploadConversionsCommand;
 use ElectricTomCat\GoogleAdsConversions\Http\Middleware\CaptureGclid;
 use ElectricTomCat\GoogleAdsConversions\Support\ConsentManager;
 use ElectricTomCat\GoogleAdsConversions\Support\EventResolver;
+use ElectricTomCat\GoogleAdsConversions\Support\GoogleAdsSetup;
 use ElectricTomCat\GoogleAdsConversions\Support\UserDataHasher;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Blade;
@@ -41,6 +42,7 @@ class GoogleAdsConversionsServiceProvider extends PackageServiceProvider
         $this->app->singleton(EventResolver::class);
         $this->app->singleton(ConsentManager::class);
         $this->app->singleton(UserDataHasher::class);
+        $this->app->singleton(GoogleAdsSetup::class);
 
         $this->app->singleton(GoogleAdsConversions::class, function ($app) {
             return new GoogleAdsConversions(
