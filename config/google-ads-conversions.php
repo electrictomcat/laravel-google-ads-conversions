@@ -36,8 +36,17 @@ return [
     |--------------------------------------------------------------------------
     | Buffer & Upload Settings
     |--------------------------------------------------------------------------
+    |
+    | upload_api controls which Google endpoint receives conversion uploads:
+    | - 'data_manager': Google Data Manager API (https://datamanager.googleapis.com/v1/events:ingest),
+    |   required by Google for offline conversion integrations created since June 15, 2026.
+    | - 'google_ads': Legacy Google Ads API (ConversionUploadService.UploadClickConversions)
+    |   for existing integrations whose OAuth refresh token only has the adwords scope.
+    |
     */
 
+    'upload_api' => env('GOOGLE_ADS_UPLOAD_API', 'data_manager'),
+    'event_source' => env('GOOGLE_ADS_EVENT_SOURCE', 'WEB'),
     'buffer_ttl_days' => 2,
     'upload_delay_hours' => 6,
     'batch_size' => 2000,

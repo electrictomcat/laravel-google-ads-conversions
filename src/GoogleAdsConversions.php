@@ -10,6 +10,7 @@ use ElectricTomCat\GoogleAdsConversions\Models\Lead;
 use ElectricTomCat\GoogleAdsConversions\Support\ClickIdentifier;
 use ElectricTomCat\GoogleAdsConversions\Support\EventResolver;
 use ElectricTomCat\GoogleAdsConversions\Support\UserDataHasher;
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Database\Eloquent\Model;
@@ -189,7 +190,7 @@ class GoogleAdsConversions
     public static function cookieNames(): array
     {
         $cookies = [];
-        if (\Illuminate\Container\Container::getInstance()?->bound('config')) {
+        if (Container::getInstance()->bound('config')) {
             $cookies = (array) config('google-ads-conversions.cookies', []);
         }
 

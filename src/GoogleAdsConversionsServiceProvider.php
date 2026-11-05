@@ -4,12 +4,14 @@ namespace ElectricTomCat\GoogleAdsConversions;
 
 use ElectricTomCat\GoogleAdsConversions\Commands\DiagnoseCommand;
 use ElectricTomCat\GoogleAdsConversions\Commands\InstallCommand;
+use ElectricTomCat\GoogleAdsConversions\Commands\RequeueConversionsCommand;
 use ElectricTomCat\GoogleAdsConversions\Commands\SyncConversionsCommand;
 use ElectricTomCat\GoogleAdsConversions\Commands\TestConnectionCommand;
 use ElectricTomCat\GoogleAdsConversions\Commands\UploadConversionsCommand;
 use ElectricTomCat\GoogleAdsConversions\Http\Middleware\CaptureGclid;
 use ElectricTomCat\GoogleAdsConversions\Support\ConsentManager;
 use ElectricTomCat\GoogleAdsConversions\Support\EventResolver;
+use ElectricTomCat\GoogleAdsConversions\Support\GoogleAdsSetup;
 use ElectricTomCat\GoogleAdsConversions\Support\UserDataHasher;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Blade;
@@ -33,6 +35,7 @@ class GoogleAdsConversionsServiceProvider extends PackageServiceProvider
                 SyncConversionsCommand::class,
                 TestConnectionCommand::class,
                 DiagnoseCommand::class,
+                RequeueConversionsCommand::class,
             ]);
     }
 
@@ -41,6 +44,7 @@ class GoogleAdsConversionsServiceProvider extends PackageServiceProvider
         $this->app->singleton(EventResolver::class);
         $this->app->singleton(ConsentManager::class);
         $this->app->singleton(UserDataHasher::class);
+        $this->app->singleton(GoogleAdsSetup::class);
 
         $this->app->singleton(GoogleAdsConversions::class, function ($app) {
             return new GoogleAdsConversions(

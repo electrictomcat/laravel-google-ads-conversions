@@ -29,7 +29,7 @@ function tracker(): GoogleAdsConversions
     return app(GoogleAdsConversions::class);
 }
 
-function makePartialFailure(array $indexToMessage): Status
+function makePartialFailure(array $indexToMessage, string $fieldName = 'conversions'): Status
 {
     $errors = [];
 
@@ -38,7 +38,7 @@ function makePartialFailure(array $indexToMessage): Status
             ->setMessage($message)
             ->setErrorCode(new ErrorCode)
             ->setLocation((new ErrorLocation)->setFieldPathElements([
-                (new FieldPathElement)->setFieldName('operations')->setIndex($index),
+                (new FieldPathElement)->setFieldName($fieldName)->setIndex($index),
             ]));
     }
 
@@ -299,6 +299,50 @@ it('treats the whole batch as unsent when the failure detail cannot be decoded',
     $uploader->uploadPendingConversions(0, false);
 
     expect($lead->fresh()->getConversions()[0]['status'])->toBe('failed');
+});
+
+it('detects partial failure errors reported at conversions[i] and never marks them uploaded', function () {
+    $lead = seedPendingLead('gclid-conversions-field');
+
+    $deprecationError = 'New integrations for uploading click conversions should use the Data Manager API. '
+        .'Usage of ConversionUploadService.UploadClickConversions is limited to existing users.';
+
+    $uploader = app(RecordingUploader::class);
+    $uploader->stubbedResponse = (new UploadClickConversionsResponse)
+        ->setPartialFailureError(makePartialFailure([0 => $deprecationError], 'conversions'));
+
+    $count = $uploader->uploadPendingConversions(0, false);
+
+    expect($count)->toBe(0);
+
+    $conv = $lead->fresh()->getConversions()[0];
+    expect($conv['status'])->toBe('failed')
+        ->and($conv)->not->toHaveKey('uploaded_at')
+        ->and($conv['error'])->toContain('Data Manager API');
+});
+
+it('fails closed when a partial failure error has no field path location', function () {
+    $lead = seedPendingLead('gclid-unattributed-error');
+
+    $failure = (new GoogleAdsFailure)->setErrors([
+        (new GoogleAdsError)->setMessage('Account-level upload error with no location'),
+    ]);
+
+    $any = new Any;
+    $any->setTypeUrl('type.googleapis.com/google.ads.googleads.v23.errors.GoogleAdsFailure');
+    $any->setValue($failure->serializeToString());
+
+    $uploader = app(RecordingUploader::class);
+    $uploader->stubbedResponse = (new UploadClickConversionsResponse)
+        ->setPartialFailureError((new Status)->setCode(3)->setMessage('partial failure')->setDetails([$any]));
+
+    $count = $uploader->uploadPendingConversions(0, false);
+
+    expect($count)->toBe(0);
+
+    $conv = $lead->fresh()->getConversions()[0];
+    expect($conv['status'])->toBe('failed')
+        ->and($conv['error'])->toContain('Account-level upload error with no location');
 });
 
 // ---------------------------------------------------------------- PKG-11
