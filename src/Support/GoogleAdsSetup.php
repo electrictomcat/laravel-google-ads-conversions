@@ -14,12 +14,16 @@ class GoogleAdsSetup
 
     public const ADWORDS_SCOPE = 'https://www.googleapis.com/auth/adwords';
 
+    public const DATA_MANAGER_SCOPE = 'https://www.googleapis.com/auth/datamanager';
+
+    public const DEFAULT_SCOPES = self::ADWORDS_SCOPE.' '.self::DATA_MANAGER_SCOPE;
+
     public const DEFAULT_REDIRECT_URI = 'http://127.0.0.1:8085';
 
     public const ENV_SECTION_HEADER = '# Google Ads Offline Conversions';
 
     /**
-     * Build the Google OAuth 2.0 authorization URL for offline Google Ads access.
+     * Build the Google OAuth 2.0 authorization URL for offline Google Ads and Data Manager access.
      */
     public function buildAuthorizationUrl(string $clientId, string $redirectUri = self::DEFAULT_REDIRECT_URI): string
     {
@@ -27,7 +31,7 @@ class GoogleAdsSetup
             'client_id' => trim($clientId),
             'redirect_uri' => trim($redirectUri),
             'response_type' => 'code',
-            'scope' => self::ADWORDS_SCOPE,
+            'scope' => self::DEFAULT_SCOPES,
             'access_type' => 'offline',
             'prompt' => 'consent',
         ], '', '&', PHP_QUERY_RFC3986);

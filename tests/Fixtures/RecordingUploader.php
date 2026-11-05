@@ -24,6 +24,11 @@ class RecordingUploader extends ConversionUploader
     /** @var array<int, UploadClickConversionsRequest> */
     public array $sentRequests = [];
 
+    protected function uploadApi(): string
+    {
+        return self::UPLOAD_API_GOOGLE_ADS;
+    }
+
     protected function client(): GoogleAdsClient
     {
         $service = Mockery::mock(ConversionUploadServiceClient::class);

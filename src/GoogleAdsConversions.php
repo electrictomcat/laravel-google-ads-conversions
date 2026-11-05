@@ -190,7 +190,7 @@ class GoogleAdsConversions
     public static function cookieNames(): array
     {
         $cookies = [];
-        if (Container::getInstance()?->bound('config')) {
+        if (Container::getInstance()->bound('config')) {
             $cookies = (array) config('google-ads-conversions.cookies', []);
         }
 

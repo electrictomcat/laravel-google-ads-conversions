@@ -286,6 +286,9 @@ class DiagnoseCommand extends Command
 
         $problems = 0;
 
+        $uploadApi = (string) config('google-ads-conversions.upload_api', 'data_manager');
+        $this->line("  Upload API: {$uploadApi}");
+
         $cookieDays = (int) config('google-ads-conversions.cookies.lifetime_minutes', 0) / 60 / 24;
 
         if ($cookieDays < self::CLICK_RETENTION_DAYS) {
@@ -329,6 +332,9 @@ class DiagnoseCommand extends Command
     protected function explain(string $error): string
     {
         return match (true) {
+            str_contains($error, 'Data Manager API') || str_contains($error, 'UploadClickConversions') => 'Google blocks new integrations from UploadClickConversions. Use the Data Manager API (upload_api = data_manager) and re-authorize with the datamanager OAuth scope.',
+            str_contains($error, 'ACCESS_TOKEN_SCOPE_INSUFFICIENT') || str_contains($error, 'insufficient authentication scopes') => 'Your OAuth refresh token is missing the https://www.googleapis.com/auth/datamanager scope. Run php artisan google-ads:install --setup to re-authorize.',
+            str_contains($error, 'SERVICE_DISABLED') || str_contains($error, 'datamanager.googleapis.com') => 'Enable the Google Data Manager API in Google Cloud Console: https://console.cloud.google.com/apis/library/datamanager.googleapis.com',
             str_contains($error, 'EXPIRED') => 'The click was older than the conversion action\'s click-through window when uploaded.',
             str_contains($error, 'TOO_RECENT_CONVERSION_ACTION') => 'The conversion action was created less than 6 hours ago.',
             str_contains($error, 'TOO_RECENT') => 'The click was under 6 hours old. Raise upload_delay_hours.',

@@ -101,8 +101,9 @@ class InstallCommand extends Command
         $this->line('<fg=yellow;options=bold>─── Step 1/4: Google Cloud OAuth 2.0 Credentials ───</>');
         $this->line('  Create or view your OAuth 2.0 Client ID (Desktop or Web application) at:');
         $this->line('  <fg=cyan>https://console.cloud.google.com/apis/credentials</>');
-        $this->line('  Ensure the Google Ads API is enabled in your project at:');
+        $this->line('  Ensure both the Google Ads API and Google Data Manager API are enabled in your project:');
         $this->line('  <fg=cyan>https://console.cloud.google.com/apis/library/googleads.googleapis.com</>');
+        $this->line('  <fg=cyan>https://console.cloud.google.com/apis/library/datamanager.googleapis.com</>');
 
         $currentClientId = (string) (config('google-ads-conversions.client_id') ?? '');
         $currentClientSecret = (string) (config('google-ads-conversions.client_secret') ?? '');

@@ -12,10 +12,14 @@ use ElectricTomCat\GoogleAdsConversions\Models\Lead;
 use ElectricTomCat\GoogleAdsConversions\Support\ClickIdentifier;
 use ElectricTomCat\GoogleAdsConversions\Support\ConsentManager;
 use ElectricTomCat\GoogleAdsConversions\Support\EventResolver;
+use ElectricTomCat\GoogleAdsConversions\Support\GoogleAdsSetup;
 use ElectricTomCat\GoogleAdsConversions\Support\UserDataHasher;
 use Google\Ads\GoogleAds\Lib\OAuth2TokenBuilder;
 use Google\Ads\GoogleAds\Lib\V23\GoogleAdsClient;
 use Google\Ads\GoogleAds\Lib\V23\GoogleAdsClientBuilder;
+use Google\Ads\GoogleAds\V23\Common\Consent;
+use Google\Ads\GoogleAds\V23\Common\UserIdentifier;
+use Google\Ads\GoogleAds\V23\Enums\ConsentStatusEnum\ConsentStatus;
 use Google\Ads\GoogleAds\V23\Enums\OfflineConversionDiagnosticStatusEnum\OfflineConversionDiagnosticStatus;
 use Google\Ads\GoogleAds\V23\Errors\GoogleAdsFailure;
 use Google\Ads\GoogleAds\V23\Services\ClickConversion;
@@ -23,21 +27,30 @@ use Google\Ads\GoogleAds\V23\Services\SearchGoogleAdsRequest;
 use Google\Ads\GoogleAds\V23\Services\UploadClickConversionsRequest;
 use Google\Ads\GoogleAds\V23\Services\UploadClickConversionsResponse;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
 /**
- * Talks to the Google Ads API: builds the SDK client, batches pending
- * conversions across leads, and posts them via UploadClickConversions.
+ * Talks to the Google Data Manager API (or legacy Google Ads API): builds the
+ * payload/client, batches pending conversions across leads, and uploads them.
  */
 class ConversionUploader
 {
     /** Google keeps click data for 90 days; nothing older can be attributed. */
     public const CLICK_RETENTION_DAYS = 90;
 
+    public const DATA_MANAGER_INGEST_ENDPOINT = 'https://datamanager.googleapis.com/v1/events:ingest';
+
+    public const UPLOAD_API_DATA_MANAGER = 'data_manager';
+
+    public const UPLOAD_API_GOOGLE_ADS = 'google_ads';
+
     protected ?GoogleAdsClient $client = null;
+
+    protected ?string $accessToken = null;
 
     public function __construct(
         protected EventResolver $events,
@@ -46,12 +59,13 @@ class ConversionUploader
     ) {}
 
     /**
-     * Drop the memoized API client. Useful in tests and long-running workers
-     * where credentials may be swapped between runs.
+     * Drop the memoized API client and access token. Useful in tests and
+     * long-running workers where credentials may be swapped between runs.
      */
     public function forgetClient(): void
     {
         $this->client = null;
+        $this->accessToken = null;
     }
 
     /**
@@ -236,20 +250,7 @@ class ConversionUploader
         }
 
         try {
-            $service = $this->client()->getConversionUploadServiceClient();
-
-            $request = UploadClickConversionsRequest::build($this->customerId(), $clicks, true);
-
-            if ($validateOnly) {
-                $request->setValidateOnly(true);
-            }
-
-            /** @var UploadClickConversionsResponse $response */
-            $response = $service->uploadClickConversions($request);
-
-            $rejected = $response->hasPartialFailureError()
-                ? $this->rejectedIndexes($response, count($clicks))
-                : [];
+            $rejected = $this->sendConversionsToGoogle($clicks, $validateOnly);
 
             foreach ($rejected as $message) {
                 $errors[] = $message;
@@ -422,7 +423,7 @@ class ConversionUploader
     }
 
     /**
-     * Upload click conversions to Google Ads API.
+     * Upload click conversions to the configured Google API (Data Manager API or legacy Google Ads API).
      *
      * @param  array<int, array{lead: HasConversions&Model, index: int, conversion: array<string, mixed>, click: ClickConversion}>  $batchItems
      * @param  array<int, ClickConversion>  $clicks
@@ -432,37 +433,7 @@ class ConversionUploader
         $isValidateOnly = $validateOnly ?? (bool) config('google-ads-conversions.validate_only', false);
 
         try {
-            $client = $this->client();
-            $service = $client->getConversionUploadServiceClient();
-
-            $request = UploadClickConversionsRequest::build(
-                $this->customerId(),
-                $clicks,
-                true, // partial_failure
-            );
-
-            if ($isValidateOnly) {
-                $request->setValidateOnly(true);
-            }
-
-            /** @var UploadClickConversionsResponse $response */
-            $response = $service->uploadClickConversions($request);
-
-            $hasPartialFailure = $response->hasPartialFailureError();
-            $partialFailureMessage = $hasPartialFailure
-                ? $response->getPartialFailureError()->getMessage()
-                : null;
-
-            $rejected = $hasPartialFailure
-                ? $this->rejectedIndexes($response, count($clicks))
-                : [];
-
-            if ($hasPartialFailure) {
-                Log::error(
-                    '[GoogleAdsConversions] Partial failure in batch upload ('.count($rejected).' of '
-                    .count($clicks).' rejected): '.$partialFailureMessage
-                );
-            }
+            $rejected = $this->sendConversionsToGoogle($clicks, $isValidateOnly);
 
             // A validate-only run must not touch stored state. Marking these
             // 'uploaded' would retire conversions Google never actually
@@ -561,17 +532,421 @@ class ConversionUploader
     }
 
     /**
+     * Dispatch the prepared ClickConversion objects to the configured Google API
+     * and return the map of rejected batch indexes (index => error message).
+     *
+     * @param  array<int, ClickConversion>  $clicks
+     * @return array<int, string>
+     */
+    protected function sendConversionsToGoogle(array $clicks, bool $validateOnly): array
+    {
+        if ($this->uploadApi() === self::UPLOAD_API_GOOGLE_ADS) {
+            return $this->uploadViaGoogleAdsApi($clicks, $validateOnly);
+        }
+
+        return $this->uploadViaDataManager($clicks, $validateOnly);
+    }
+
+    /**
+     * Upload conversions via the legacy Google Ads API ConversionUploadService.UploadClickConversions.
+     *
+     * @param  array<int, ClickConversion>  $clicks
+     * @return array<int, string>
+     */
+    protected function uploadViaGoogleAdsApi(array $clicks, bool $validateOnly): array
+    {
+        $client = $this->client();
+        $service = $client->getConversionUploadServiceClient();
+
+        $request = UploadClickConversionsRequest::build(
+            $this->customerId(),
+            $clicks,
+            true, // partial_failure
+        );
+
+        if ($validateOnly) {
+            $request->setValidateOnly(true);
+        }
+
+        /** @var UploadClickConversionsResponse $response */
+        $response = $service->uploadClickConversions($request);
+
+        if (! $response->hasPartialFailureError()) {
+            return [];
+        }
+
+        $partialFailureMessage = $response->getPartialFailureError()->getMessage();
+        $rejected = $this->rejectedIndexes($response, count($clicks));
+
+        Log::error(
+            '[GoogleAdsConversions] Partial failure in batch upload ('.count($rejected).' of '
+            .count($clicks).' rejected): '.$partialFailureMessage
+        );
+
+        return $rejected;
+    }
+
+    /**
+     * Upload conversions via the Google Data Manager API (https://datamanager.googleapis.com/v1/events:ingest).
+     *
+     * Required by Google for all new offline click conversion integrations since June 15, 2026.
+     *
+     * @param  array<int, ClickConversion>  $clicks
+     * @return array<int, string>
+     */
+    protected function uploadViaDataManager(array $clicks, bool $validateOnly): array
+    {
+        $batchSize = count($clicks);
+
+        if ($batchSize === 0) {
+            return [];
+        }
+
+        try {
+            $token = $this->accessToken();
+            $payload = $this->buildDataManagerPayload($clicks, $validateOnly);
+
+            $response = Http::withToken($token)
+                ->acceptJson()
+                ->asJson()
+                ->timeout(30)
+                ->post(self::DATA_MANAGER_INGEST_ENDPOINT, $payload);
+
+            if ($response->successful()) {
+                return [];
+            }
+
+            $parsed = $this->parseDataManagerError($response);
+
+            // Data Manager API uses a fast-fail model: if one event in a multi-event
+            // batch has a field violation, Google rejects the entire HTTP request and
+            // ingests zero events. When specific event index(es) are identified in a
+            // multi-event batch, isolate those rejected events and re-send the valid
+            // subset so valid conversions actually land in Google Ads.
+            if ($parsed['general_errors'] === [] && $parsed['event_errors'] !== [] && count($parsed['event_errors']) < $batchSize) {
+                $rejected = [];
+                $remainingClicks = [];
+                $remainingOriginalIndexes = [];
+
+                foreach ($clicks as $i => $click) {
+                    if (isset($parsed['event_errors'][$i])) {
+                        $rejected[$i] = $parsed['event_errors'][$i];
+                    } else {
+                        $remainingClicks[] = $click;
+                        $remainingOriginalIndexes[] = $i;
+                    }
+                }
+
+                if ($remainingClicks !== []) {
+                    $retryPayload = $this->buildDataManagerPayload($remainingClicks, $validateOnly);
+                    $retryResponse = Http::withToken($token)
+                        ->acceptJson()
+                        ->asJson()
+                        ->timeout(30)
+                        ->post(self::DATA_MANAGER_INGEST_ENDPOINT, $retryPayload);
+
+                    if (! $retryResponse->successful()) {
+                        $retryParsed = $this->parseDataManagerError($retryResponse);
+                        foreach ($remainingOriginalIndexes as $retryIdx => $origIdx) {
+                            $rejected[$origIdx] = $retryParsed['event_errors'][$retryIdx] ?? $retryParsed['summary'];
+                        }
+                    }
+                }
+
+                Log::error(
+                    '[GoogleAdsConversions] Data Manager API rejected '.count($rejected).' of '
+                    ."{$batchSize} conversion(s): ".$parsed['summary']
+                );
+
+                return $rejected;
+            }
+
+            $rejected = [];
+            for ($i = 0; $i < $batchSize; $i++) {
+                $rejected[$i] = $parsed['event_errors'][$i] ?? $parsed['summary'];
+            }
+
+            Log::error(
+                '[GoogleAdsConversions] Data Manager API upload failed ('.count($rejected).' of '
+                ."{$batchSize} rejected): ".$parsed['summary']
+            );
+
+            return $rejected;
+        } catch (\Throwable $e) {
+            Log::error('[GoogleAdsConversions] Data Manager API upload error: '.$e->getMessage());
+
+            return array_fill(0, $batchSize, $e->getMessage());
+        }
+    }
+
+    /**
+     * Build a Google Data Manager API IngestEventsRequest payload from ClickConversions.
+     *
+     * @param  array<int, ClickConversion>  $clicks
+     * @return array<string, mixed>
+     */
+    public function buildDataManagerPayload(array $clicks, bool $validateOnly = false): array
+    {
+        $operatingAccountId = str_replace('-', '', $this->customerId());
+        $loginCustomerId = config('google-ads-conversions.login_customer_id');
+        $loginAccountId = $loginCustomerId !== null && $loginCustomerId !== ''
+            ? str_replace('-', '', (string) $loginCustomerId)
+            : $operatingAccountId;
+
+        $destinationsByKey = [];
+        $events = [];
+        $hasUserData = false;
+        $eventSource = (string) config('google-ads-conversions.event_source', 'WEB');
+
+        foreach ($clicks as $click) {
+            $resourceName = $click->getConversionAction();
+            $actionAccountId = $operatingAccountId;
+
+            if (preg_match('/^customers\/(\d+)\/conversionActions\/(\d+)$/', $resourceName, $matches) === 1) {
+                $actionAccountId = $matches[1];
+                $actionId = $matches[2];
+            } else {
+                $actionId = $resourceName;
+            }
+
+            $destKey = "{$actionAccountId}:{$actionId}";
+
+            if (! isset($destinationsByKey[$destKey])) {
+                $reference = 'dest_'.(count($destinationsByKey) + 1);
+                $destination = [
+                    'reference' => $reference,
+                    'operatingAccount' => [
+                        'accountType' => 'GOOGLE_ADS',
+                        'accountId' => $actionAccountId,
+                    ],
+                    'productDestinationId' => (string) $actionId,
+                ];
+
+                if ($loginAccountId !== '') {
+                    $destination['loginAccount'] = [
+                        'accountType' => 'GOOGLE_ADS',
+                        'accountId' => $loginAccountId,
+                    ];
+                }
+
+                $destinationsByKey[$destKey] = $destination;
+            }
+
+            $destReference = $destinationsByKey[$destKey]['reference'];
+
+            $event = [
+                'destinationReferences' => [$destReference],
+                'eventTimestamp' => $this->formatRfc3339Timestamp($click->getConversionDateTime()),
+                'eventSource' => $eventSource,
+            ];
+
+            $adIdentifiers = [];
+            if ($click->getGclid() !== '') {
+                $adIdentifiers['gclid'] = $click->getGclid();
+            }
+            if ($click->getGbraid() !== '') {
+                $adIdentifiers['gbraid'] = $click->getGbraid();
+            }
+            if ($click->getWbraid() !== '') {
+                $adIdentifiers['wbraid'] = $click->getWbraid();
+            }
+
+            if ($adIdentifiers !== []) {
+                $event['adIdentifiers'] = $adIdentifiers;
+            }
+
+            if ($click->hasConversionValue()) {
+                $event['conversionValue'] = (float) $click->getConversionValue();
+            }
+
+            if ($click->getCurrencyCode() !== '') {
+                $event['currency'] = $click->getCurrencyCode();
+            }
+
+            if ($click->getOrderId() !== '') {
+                $event['transactionId'] = $click->getOrderId();
+            }
+
+            if ($click->hasConsent() && $click->getConsent() !== null) {
+                $consentPayload = $this->formatDataManagerConsent($click->getConsent());
+                if ($consentPayload !== []) {
+                    $event['consent'] = $consentPayload;
+                }
+            }
+
+            if ($click->getUserIdentifiers()->count() > 0) {
+                $userIdentifiers = [];
+                /** @var UserIdentifier $identifier */
+                foreach ($click->getUserIdentifiers() as $identifier) {
+                    if ($identifier->getHashedEmail() !== '') {
+                        $userIdentifiers[] = ['emailAddress' => $identifier->getHashedEmail()];
+                    }
+                    if ($identifier->getHashedPhoneNumber() !== '') {
+                        $userIdentifiers[] = ['phoneNumber' => $identifier->getHashedPhoneNumber()];
+                    }
+                }
+
+                if ($userIdentifiers !== []) {
+                    $event['userData'] = [
+                        'userIdentifiers' => $userIdentifiers,
+                    ];
+                    $hasUserData = true;
+                }
+            }
+
+            $events[] = $event;
+        }
+
+        $payload = [
+            'destinations' => array_values($destinationsByKey),
+            'events' => $events,
+            'validateOnly' => $validateOnly,
+        ];
+
+        if ($hasUserData) {
+            $payload['encoding'] = 'HEX';
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Convert a Google Ads date-time string ('Y-m-d H:i:sP') to RFC 3339 ('Y-m-d\TH:i:sP').
+     */
+    protected function formatRfc3339Timestamp(string $dateTime): string
+    {
+        return (string) preg_replace('/^(\d{4}-\d{2}-\d{2})\s+/', '$1T', trim($dateTime));
+    }
+
+    /**
+     * Format a Google Ads Consent protobuf object for the Data Manager API.
+     *
+     * @return array<string, string>
+     */
+    protected function formatDataManagerConsent(Consent $consent): array
+    {
+        $result = [];
+
+        $adUserData = $this->mapDataManagerConsentStatus($consent->getAdUserData());
+        if ($adUserData !== null) {
+            $result['adUserData'] = $adUserData;
+        }
+
+        $adPersonalization = $this->mapDataManagerConsentStatus($consent->getAdPersonalization());
+        if ($adPersonalization !== null) {
+            $result['adPersonalization'] = $adPersonalization;
+        }
+
+        return $result;
+    }
+
+    protected function mapDataManagerConsentStatus(int $status): ?string
+    {
+        return match ($status) {
+            ConsentStatus::GRANTED => 'CONSENT_GRANTED',
+            ConsentStatus::DENIED => 'CONSENT_DENIED',
+            default => null,
+        };
+    }
+
+    /**
+     * Parse an error response from the Google Data Manager API into per-event and general errors.
+     *
+     * @return array{summary: string, event_errors: array<int, string>, general_errors: array<int, string>}
+     */
+    protected function parseDataManagerError(Response $response): array
+    {
+        $rawBody = $response->body();
+        $json = $response->json();
+        $payload = is_array($json) ? $json : [];
+        $error = is_array($payload['error'] ?? null) ? $payload['error'] : [];
+
+        $baseMessage = (string) ($error['message'] ?? ('HTTP '.$response->status()));
+        $status = (string) ($error['status'] ?? '');
+        $details = is_array($error['details'] ?? null) ? $error['details'] : [];
+
+        $eventViolations = [];
+        $generalViolations = [];
+
+        foreach ($details as $detail) {
+            if (! is_array($detail)) {
+                continue;
+            }
+
+            if (isset($detail['reason']) && is_string($detail['reason']) && $detail['reason'] !== 'INVALID_ARGUMENT') {
+                $generalViolations[] = $detail['reason'];
+            }
+
+            $fieldViolations = is_array($detail['fieldViolations'] ?? null) ? $detail['fieldViolations'] : [];
+
+            foreach ($fieldViolations as $violation) {
+                if (! is_array($violation)) {
+                    continue;
+                }
+
+                $field = (string) ($violation['field'] ?? '');
+                $desc = (string) ($violation['description'] ?? '');
+                $reason = (string) ($violation['reason'] ?? '');
+
+                $violationText = match (true) {
+                    $desc !== '' && $reason !== '' => "{$desc} [{$reason}]",
+                    $desc !== '' => $desc,
+                    $reason !== '' => $reason,
+                    default => 'Validation failed',
+                };
+
+                if ($field !== '') {
+                    $violationText .= " (at {$field})";
+                }
+
+                if (preg_match('/\bevents\[(\d+)\]/', $field, $matches) === 1) {
+                    $idx = (int) $matches[1];
+                    $eventViolations[$idx][] = $violationText;
+                } else {
+                    $generalViolations[] = $violationText;
+                }
+            }
+        }
+
+        if (str_contains($rawBody, 'ACCESS_TOKEN_SCOPE_INSUFFICIENT') || str_contains(strtolower($baseMessage), 'insufficient authentication scopes')) {
+            $generalViolations[] = 'OAuth token is missing the Data Manager API scope (https://www.googleapis.com/auth/datamanager). '
+                .'Run `php artisan google-ads:install --setup` to re-authorize, or set GOOGLE_ADS_UPLOAD_API=google_ads for legacy integrations.';
+        } elseif (str_contains($rawBody, 'SERVICE_DISABLED') || str_contains($rawBody, 'Data Manager API has not been used')) {
+            $generalViolations[] = 'Enable the Google Data Manager API in Google Cloud Console: https://console.cloud.google.com/apis/library/datamanager.googleapis.com';
+        }
+
+        $eventErrors = [];
+        foreach ($eventViolations as $idx => $messages) {
+            $eventErrors[$idx] = implode('; ', array_unique($messages));
+        }
+
+        $summaryParts = [$status !== '' ? "{$baseMessage} ({$status})" : $baseMessage];
+        if ($generalViolations !== []) {
+            $summaryParts[] = implode('; ', array_unique($generalViolations));
+        } elseif ($eventErrors !== []) {
+            $summaryParts[] = implode('; ', array_unique(array_values($eventErrors)));
+        }
+
+        return [
+            'summary' => implode(': ', $summaryParts),
+            'event_errors' => $eventErrors,
+            'general_errors' => $generalViolations,
+        ];
+    }
+
+    /**
      * Map a partial-failure response to the batch indexes Google rejected.
      *
      * `partial_failure_error` carries a GoogleAdsFailure whose errors each
-     * point at the operation index that produced them. Without unpacking it,
-     * a rejected conversion is indistinguishable from an accepted one.
+     * point at the conversion or operation index that produced them. Without
+     * unpacking it, a rejected conversion is indistinguishable from an accepted one.
      *
      * @return array<int, string> index => error message
      */
     protected function rejectedIndexes(UploadClickConversionsResponse $response, int $batchSize): array
     {
         $rejected = [];
+        $unattributedErrors = [];
 
         try {
             $status = $response->getPartialFailureError();
@@ -585,7 +960,7 @@ class ConversionUploader
                     $matched = false;
 
                     foreach ($error->getLocation()?->getFieldPathElements() ?? [] as $element) {
-                        if ($element->getFieldName() === 'operations') {
+                        if (in_array($element->getFieldName(), ['conversions', 'operations'], true)) {
                             $rejected[(int) $element->getIndex()] = $message;
                             $matched = true;
                         }
@@ -593,8 +968,20 @@ class ConversionUploader
 
                     if (! $matched) {
                         Log::error('[GoogleAdsConversions] Unattributed partial-failure error: '.$message);
+                        $unattributedErrors[] = $message;
                     }
                 }
+            }
+
+            if ($unattributedErrors !== []) {
+                $fallbackMessage = implode('; ', array_unique($unattributedErrors));
+                for ($i = 0; $i < $batchSize; $i++) {
+                    $rejected[$i] ??= $fallbackMessage;
+                }
+            } elseif ($rejected === [] && $batchSize > 0) {
+                $fallbackMessage = $status?->getMessage() ?: 'Partial failure reported with no index details.';
+
+                return array_fill(0, $batchSize, $fallbackMessage);
             }
         } catch (\Throwable $e) {
             // If the failure detail cannot be decoded we cannot tell which rows
@@ -800,7 +1187,12 @@ class ConversionUploader
             return $action;
         }
 
-        $customerId = $this->customerId();
+        $customerId = str_replace('-', '', $this->customerId());
+
+        if ($customerId !== '' && preg_match('/^\d+$/', trim($action)) === 1) {
+            return "customers/{$customerId}/conversionActions/".trim($action);
+        }
+
         $cacheKey = "google_ads_conversion_action:{$customerId}:".md5($action);
 
         $cached = Cache::get($cacheKey);
@@ -874,6 +1266,59 @@ class ConversionUploader
     protected function customerId(): string
     {
         return (string) config('google-ads-conversions.customer_id');
+    }
+
+    protected function uploadApi(): string
+    {
+        $api = strtolower(trim((string) config('google-ads-conversions.upload_api', self::UPLOAD_API_DATA_MANAGER)));
+
+        return $api === self::UPLOAD_API_GOOGLE_ADS
+            ? self::UPLOAD_API_GOOGLE_ADS
+            : self::UPLOAD_API_DATA_MANAGER;
+    }
+
+    /**
+     * Obtain a valid OAuth 2.0 Bearer access token for the Data Manager API.
+     */
+    protected function accessToken(): string
+    {
+        if ($this->accessToken !== null && $this->accessToken !== '') {
+            return $this->accessToken;
+        }
+
+        $clientId = trim((string) config('google-ads-conversions.client_id', ''));
+        $clientSecret = trim((string) config('google-ads-conversions.client_secret', ''));
+        $refreshToken = trim((string) config('google-ads-conversions.refresh_token', ''));
+
+        if ($clientId === '' || $clientSecret === '' || $refreshToken === '') {
+            throw new \RuntimeException(
+                'Missing Google OAuth credentials (client_id, client_secret, or refresh_token).'
+            );
+        }
+
+        $response = Http::asForm()->timeout(15)->post(GoogleAdsSetup::OAUTH_TOKEN_ENDPOINT, [
+            'grant_type' => 'refresh_token',
+            'client_id' => $clientId,
+            'client_secret' => $clientSecret,
+            'refresh_token' => $refreshToken,
+        ]);
+
+        $data = $response->json();
+        $payload = is_array($data) ? $data : [];
+
+        if (! $response->successful()) {
+            $errorDesc = $payload['error_description'] ?? $payload['error'] ?? ('HTTP '.$response->status());
+
+            throw new \RuntimeException('Failed to refresh Google OAuth access token: '.$errorDesc);
+        }
+
+        $token = $payload['access_token'] ?? null;
+
+        if (! is_string($token) || $token === '') {
+            throw new \RuntimeException('Google OAuth token endpoint did not return an access_token.');
+        }
+
+        return $this->accessToken = $token;
     }
 
     /**
