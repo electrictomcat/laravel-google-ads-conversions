@@ -127,7 +127,10 @@ class InstallCommand extends Command
 
         $refreshToken = $currentRefreshToken;
         $accessToken = null;
-        $redirectUri = (string) ($this->option('redirect-uri') ?: GoogleAdsSetup::DEFAULT_REDIRECT_URI);
+        $redirectUriOption = $this->option('redirect-uri');
+        $redirectUri = is_string($redirectUriOption) && trim($redirectUriOption) !== ''
+            ? trim($redirectUriOption)
+            : GoogleAdsSetup::DEFAULT_REDIRECT_URI;
 
         if ($clientId !== '' && $clientSecret !== '') {
             $authUrl = $setup->buildAuthorizationUrl($clientId, $redirectUri);

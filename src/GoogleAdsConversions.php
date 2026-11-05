@@ -478,9 +478,6 @@ class GoogleAdsConversions
         $hasGbraid = $this->modelHasColumn('gbraid');
         $hasWbraid = $this->modelHasColumn('wbraid');
 
-        /** @var (HasConversions&Model)|null $lead */
-        $lead = null;
-
         if ($isVisitorKey) {
             $lead = $modelClass::query()
                 ->where('visitor_id', substr($clickId, strlen(self::VISITOR_KEY_PREFIX)))
@@ -515,8 +512,9 @@ class GoogleAdsConversions
                 ->first();
         }
 
-        if (! $lead) {
+        if (! $lead instanceof HasConversions) {
             $lead = new $modelClass;
+            assert($lead instanceof HasConversions);
 
             if ($isVisitorKey) {
                 $lead->setVisitorId(substr($clickId, strlen(self::VISITOR_KEY_PREFIX)));
@@ -547,8 +545,6 @@ class GoogleAdsConversions
                 }
             }
         }
-
-        assert($lead instanceof HasConversions);
 
         if ($leadData) {
             if (! $hasGbraid) {
@@ -701,7 +697,6 @@ class GoogleAdsConversions
             return $this->visitorHistory;
         }
 
-        /** @var (HasConversions&Model)|null $lead */
         $lead = $this->modelClass()::query()
             ->where('visitor_id', $visitorId)
             ->where(function ($query) use ($hasGclid, $hasGbraid, $hasWbraid) {
@@ -913,7 +908,7 @@ class GoogleAdsConversions
     }
 
     /**
-     * @return class-string<HasConversions&Model>
+     * @return class-string<Model>
      */
     protected function modelClass(): string
     {
