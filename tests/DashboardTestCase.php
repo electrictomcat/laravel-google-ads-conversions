@@ -10,7 +10,7 @@ namespace ElectricTomCat\GoogleAdsConversions\Tests;
  * Auth is dropped here only because the package ships no auth scaffolding to
  * log into; DashboardDisabledTest covers the shipped defaults.
  */
-class DashboardTestCase extends TestCase
+abstract class DashboardTestCase extends TestCase
 {
     public function getEnvironmentSetUp($app)
     {

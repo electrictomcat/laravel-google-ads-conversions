@@ -1,71 +1,83 @@
 <?php
 
+namespace ElectricTomCat\GoogleAdsConversions\Tests\Feature;
+
 use ElectricTomCat\GoogleAdsConversions\GoogleAdsConversions;
 use ElectricTomCat\GoogleAdsConversions\Models\Lead;
+use ElectricTomCat\GoogleAdsConversions\Tests\TestCase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Session;
 
-it('exposes the resolved gclid from the session', function () {
-    Session::put('google_ads_gclid', 'gclid-from-session');
+class GclidResolutionTest extends TestCase
+{
+    public function test_it_exposes_the_resolved_gclid_from_the_session(): void
+    {
+        Session::put('google_ads_gclid', 'gclid-from-session');
 
-    expect(app(GoogleAdsConversions::class)->gclid())->toBe('gclid-from-session');
-});
+        $this->assertSame('gclid-from-session', app(GoogleAdsConversions::class)->gclid());
+    }
 
-it('falls back to the visitor history lookup', function () {
-    Lead::create(['gclid' => 'gclid-from-history', 'visitor_id' => 'visitor-abc']);
+    public function test_it_falls_back_to_the_visitor_history_lookup(): void
+    {
+        Lead::create(['gclid' => 'gclid-from-history', 'visitor_id' => 'visitor-abc']);
 
-    request()->cookies->set('google_ads_visitor_id', 'visitor-abc');
+        request()->cookies->set('google_ads_visitor_id', 'visitor-abc');
 
-    expect(app(GoogleAdsConversions::class)->gclid())->toBe('gclid-from-history');
-});
+        $this->assertSame('gclid-from-history', app(GoogleAdsConversions::class)->gclid());
+    }
 
-it('returns null when nothing resolves', function () {
-    expect(app(GoogleAdsConversions::class)->gclid())->toBeNull();
-});
+    public function test_it_returns_null_when_nothing_resolves(): void
+    {
+        $this->assertNull(app(GoogleAdsConversions::class)->gclid());
+    }
 
-it('memoizes the visitor history lookup for the request', function () {
-    Lead::create(['gclid' => 'gclid-memo', 'visitor_id' => 'visitor-memo']);
+    public function test_it_memoizes_the_visitor_history_lookup_for_the_request(): void
+    {
+        Lead::create(['gclid' => 'gclid-memo', 'visitor_id' => 'visitor-memo']);
 
-    request()->cookies->set('google_ads_visitor_id', 'visitor-memo');
+        request()->cookies->set('google_ads_visitor_id', 'visitor-memo');
 
-    $conversions = app(GoogleAdsConversions::class);
+        $conversions = app(GoogleAdsConversions::class);
 
-    // Prime the memo, then count queries on the repeat calls.
-    expect($conversions->gclid())->toBe('gclid-memo');
+        // Prime the memo, then count queries on the repeat calls.
+        $this->assertSame('gclid-memo', $conversions->gclid());
 
-    $queries = 0;
-    DB::listen(function () use (&$queries) {
-        $queries++;
-    });
+        $queries = 0;
+        DB::listen(function () use (&$queries) {
+            $queries++;
+        });
 
-    expect($conversions->gclid())->toBe('gclid-memo')
-        ->and($conversions->gclid())->toBe('gclid-memo')
-        ->and($queries)->toBe(0);
-});
+        $this->assertSame('gclid-memo', $conversions->gclid());
+        $this->assertSame('gclid-memo', $conversions->gclid());
+        $this->assertSame(0, $queries);
+    }
 
-it('memoizes a null result so a missing gclid is not looked up repeatedly', function () {
-    request()->cookies->set('google_ads_visitor_id', 'visitor-unknown');
+    public function test_it_memoizes_a_null_result_so_a_missing_gclid_is_not_looked_up_repeatedly(): void
+    {
+        request()->cookies->set('google_ads_visitor_id', 'visitor-unknown');
 
-    $conversions = app(GoogleAdsConversions::class);
+        $conversions = app(GoogleAdsConversions::class);
 
-    expect($conversions->gclid())->toBeNull();
+        $this->assertNull($conversions->gclid());
 
-    $queries = 0;
-    DB::listen(function () use (&$queries) {
-        $queries++;
-    });
+        $queries = 0;
+        DB::listen(function () use (&$queries) {
+            $queries++;
+        });
 
-    expect($conversions->gclid())->toBeNull()
-        ->and($queries)->toBe(0);
-});
+        $this->assertNull($conversions->gclid());
+        $this->assertSame(0, $queries);
+    }
 
-it('resolves again after forgetGclid()', function () {
-    $conversions = app(GoogleAdsConversions::class);
+    public function test_it_resolves_again_after_forget_gclid(): void
+    {
+        $conversions = app(GoogleAdsConversions::class);
 
-    expect($conversions->gclid())->toBeNull();
+        $this->assertNull($conversions->gclid());
 
-    Session::put('google_ads_gclid', 'gclid-after-forget');
-    $conversions->forgetGclid();
+        Session::put('google_ads_gclid', 'gclid-after-forget');
+        $conversions->forgetGclid();
 
-    expect($conversions->gclid())->toBe('gclid-after-forget');
-});
+        $this->assertSame('gclid-after-forget', $conversions->gclid());
+    }
+}

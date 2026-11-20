@@ -1,56 +1,70 @@
 <?php
 
+namespace ElectricTomCat\GoogleAdsConversions\Tests\Feature;
+
 use ElectricTomCat\GoogleAdsConversions\Facades\GoogleAdsConversions;
+use ElectricTomCat\GoogleAdsConversions\Tests\TestCase;
 use Illuminate\Support\Facades\Blade;
 
-beforeEach(function () {
-    GoogleAdsConversions::forgetGclid();
-    session()->flush();
-});
+class NavigationTrackingBladeDirectiveTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
 
-test('test_directive_renders_nothing_when_visitor_has_no_attribution', function () {
-    $rendered = Blade::render('@googleAdsNavigationTracking');
+        GoogleAdsConversions::forgetGclid();
+        session()->flush();
+    }
 
-    expect(trim($rendered))->toBeEmpty();
-});
+    public function test_directive_renders_nothing_when_visitor_has_no_attribution(): void
+    {
+        $rendered = Blade::render('@googleAdsNavigationTracking');
 
-test('test_directive_renders_script_when_gclid_present', function () {
-    session(['google_ads_gclid' => 'gclid-directive-test']);
+        $this->assertEmpty(trim($rendered));
+    }
 
-    $rendered = Blade::render('@googleAdsNavigationTracking');
+    public function test_directive_renders_script_when_gclid_present(): void
+    {
+        session(['google_ads_gclid' => 'gclid-directive-test']);
 
-    expect($rendered)->toContain('<script data-navigate-once>')
-        ->and($rendered)->toContain('sendNavigationEvent')
-        ->and($rendered)->toContain('google_ads_gclid')
-        ->and($rendered)->toContain('Page Navigation:');
-});
+        $rendered = Blade::render('@googleAdsNavigationTracking');
 
-test('test_directive_renders_script_when_gbraid_present', function () {
-    session(['google_ads_gbraid' => 'gbraid-directive-test']);
+        $this->assertStringContainsString('<script data-navigate-once>', $rendered);
+        $this->assertStringContainsString('sendNavigationEvent', $rendered);
+        $this->assertStringContainsString('google_ads_gclid', $rendered);
+        $this->assertStringContainsString('Page Navigation:', $rendered);
+    }
 
-    $rendered = Blade::render('@googleAdsNavigationTracking');
+    public function test_directive_renders_script_when_gbraid_present(): void
+    {
+        session(['google_ads_gbraid' => 'gbraid-directive-test']);
 
-    expect($rendered)->toContain('<script data-navigate-once>')
-        ->and($rendered)->toContain('sendNavigationEvent')
-        ->and($rendered)->toContain('google_ads_gbraid')
-        ->and($rendered)->toContain('Page Navigation:');
-});
+        $rendered = Blade::render('@googleAdsNavigationTracking');
 
-test('test_directive_renders_script_when_wbraid_present', function () {
-    session(['google_ads_wbraid' => 'wbraid-directive-test']);
+        $this->assertStringContainsString('<script data-navigate-once>', $rendered);
+        $this->assertStringContainsString('sendNavigationEvent', $rendered);
+        $this->assertStringContainsString('google_ads_gbraid', $rendered);
+        $this->assertStringContainsString('Page Navigation:', $rendered);
+    }
 
-    $rendered = Blade::render('@googleAdsNavigationTracking');
+    public function test_directive_renders_script_when_wbraid_present(): void
+    {
+        session(['google_ads_wbraid' => 'wbraid-directive-test']);
 
-    expect($rendered)->toContain('<script data-navigate-once>')
-        ->and($rendered)->toContain('sendNavigationEvent')
-        ->and($rendered)->toContain('google_ads_wbraid')
-        ->and($rendered)->toContain('Page Navigation:');
-});
+        $rendered = Blade::render('@googleAdsNavigationTracking');
 
-test('google ads script directive renders track helper function', function () {
-    $rendered = Blade::render('@googleAdsScript');
+        $this->assertStringContainsString('<script data-navigate-once>', $rendered);
+        $this->assertStringContainsString('sendNavigationEvent', $rendered);
+        $this->assertStringContainsString('google_ads_wbraid', $rendered);
+        $this->assertStringContainsString('Page Navigation:', $rendered);
+    }
 
-    expect($rendered)->toContain('<script data-navigate-once>')
-        ->and($rendered)->toContain('window.trackGoogleAdsConversion')
-        ->and($rendered)->toContain('navigator.sendBeacon');
-});
+    public function test_google_ads_script_directive_renders_track_helper_function(): void
+    {
+        $rendered = Blade::render('@googleAdsScript');
+
+        $this->assertStringContainsString('<script data-navigate-once>', $rendered);
+        $this->assertStringContainsString('window.trackGoogleAdsConversion', $rendered);
+        $this->assertStringContainsString('navigator.sendBeacon', $rendered);
+    }
+}

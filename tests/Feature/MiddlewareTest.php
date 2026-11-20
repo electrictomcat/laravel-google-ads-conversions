@@ -1,59 +1,72 @@
 <?php
 
+namespace ElectricTomCat\GoogleAdsConversions\Tests\Feature;
+
 use ElectricTomCat\GoogleAdsConversions\GoogleAdsConversions;
 use ElectricTomCat\GoogleAdsConversions\Http\Middleware\CaptureGclid;
 use ElectricTomCat\GoogleAdsConversions\Models\Lead;
+use ElectricTomCat\GoogleAdsConversions\Tests\TestCase;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Route;
 
-beforeEach(function () {
-    Route::middleware([
-        AddQueuedCookiesToResponse::class,
-        StartSession::class,
-        CaptureGclid::class,
-    ])->get('/landing', fn () => 'ok');
-});
+class MiddlewareTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
 
-it('buffers gclid + tracking data in cache, not in the database', function () {
-    $gclid = 'gclid-mw-buffer';
+        Route::middleware([
+            AddQueuedCookiesToResponse::class,
+            StartSession::class,
+            CaptureGclid::class,
+        ])->get('/landing', fn () => 'ok');
+    }
 
-    $this->get('/landing?gclid='.$gclid.'&utm_source=google&utm_campaign=spring')
-        ->assertOk();
+    public function test_it_buffers_gclid_and_tracking_data_in_cache_not_in_the_database(): void
+    {
+        $gclid = 'gclid-mw-buffer';
 
-    expect(Lead::where('gclid', $gclid)->exists())->toBeFalse();
-    expect(app(GoogleAdsConversions::class)->pendingClickIds())->toContain($gclid);
+        $this->get('/landing?gclid='.$gclid.'&utm_source=google&utm_campaign=spring')
+            ->assertOk();
 
-    $buffered = Cache::get(GoogleAdsConversions::LEAD_DATA_PREFIX.$gclid);
+        $this->assertFalse(Lead::where('gclid', $gclid)->exists());
+        $this->assertContains($gclid, app(GoogleAdsConversions::class)->pendingClickIds());
 
-    expect($buffered['utm_source'])->toBe('google')
-        ->and($buffered['utm_campaign'])->toBe('spring')
-        ->and($buffered['landing_page'])->toBe('/landing');
-});
+        $buffered = Cache::get(GoogleAdsConversions::LEAD_DATA_PREFIX.$gclid);
 
-it('persists buffered data into the database after sync', function () {
-    $gclid = 'gclid-mw-persist';
+        $this->assertSame('google', $buffered['utm_source']);
+        $this->assertSame('spring', $buffered['utm_campaign']);
+        $this->assertSame('/landing', $buffered['landing_page']);
+    }
 
-    $this->get('/landing?gclid='.$gclid.'&utm_source=google');
+    public function test_it_persists_buffered_data_into_the_database_after_sync(): void
+    {
+        $gclid = 'gclid-mw-persist';
 
-    app(GoogleAdsConversions::class)->syncToDatabase();
+        $this->get('/landing?gclid='.$gclid.'&utm_source=google');
 
-    $lead = Lead::where('gclid', $gclid)->first();
+        app(GoogleAdsConversions::class)->syncToDatabase();
 
-    expect($lead)->not->toBeNull()
-        ->and($lead->utm_source)->toBe('google')
-        ->and($lead->visitor_id)->not->toBeNull();
-});
+        $lead = Lead::where('gclid', $gclid)->first();
 
-it('also captures gbraid as a gclid alternative', function () {
-    $this->get('/landing?gbraid=test-gbraid');
+        $this->assertNotNull($lead);
+        $this->assertSame('google', $lead->utm_source);
+        $this->assertNotNull($lead->visitor_id);
+    }
 
-    expect(app(GoogleAdsConversions::class)->pendingClickIds())->toContain('test-gbraid');
-});
+    public function test_it_also_captures_gbraid_as_a_gclid_alternative(): void
+    {
+        $this->get('/landing?gbraid=test-gbraid');
 
-it('does not buffer when no click ID is on the URL', function () {
-    $this->get('/landing?utm_source=organic');
+        $this->assertContains('test-gbraid', app(GoogleAdsConversions::class)->pendingClickIds());
+    }
 
-    expect(app(GoogleAdsConversions::class)->pendingClickIds())->toBeEmpty();
-});
+    public function test_it_does_not_buffer_when_no_click_id_is_on_the_url(): void
+    {
+        $this->get('/landing?utm_source=organic');
+
+        $this->assertEmpty(app(GoogleAdsConversions::class)->pendingClickIds());
+    }
+}

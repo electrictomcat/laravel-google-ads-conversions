@@ -1,175 +1,193 @@
 <?php
 
+namespace ElectricTomCat\GoogleAdsConversions\Tests\Feature;
+
 use ElectricTomCat\GoogleAdsConversions\GoogleAdsConversions;
 use ElectricTomCat\GoogleAdsConversions\Models\Lead;
+use ElectricTomCat\GoogleAdsConversions\Tests\TestCase;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
-beforeEach(function () {
-    Schema::dropIfExists('leads');
-    Schema::create('leads', function (Blueprint $table) {
-        $table->id();
-        $table->string('gclid')->unique();
-        $table->uuid('visitor_id')->nullable()->index();
-        $table->json('conversions')->nullable();
-        $table->text('landing_page')->nullable();
-        $table->string('source')->nullable();
-        $table->string('utm_source')->nullable();
-        $table->string('utm_medium')->nullable();
-        $table->string('utm_campaign')->nullable();
-        $table->string('utm_content')->nullable();
-        $table->string('utm_term')->nullable();
-        $table->string('gad_source')->nullable();
-        $table->string('gad_campaignid')->nullable();
-        $table->timestamps();
-    });
+class LegacySchemaTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
 
-    GoogleAdsConversions::flushColumnCache();
-});
+        Schema::dropIfExists('leads');
+        Schema::create('leads', function (Blueprint $table) {
+            $table->id();
+            $table->string('gclid')->unique();
+            $table->uuid('visitor_id')->nullable()->index();
+            $table->json('conversions')->nullable();
+            $table->text('landing_page')->nullable();
+            $table->string('source')->nullable();
+            $table->string('utm_source')->nullable();
+            $table->string('utm_medium')->nullable();
+            $table->string('utm_campaign')->nullable();
+            $table->string('utm_content')->nullable();
+            $table->string('utm_term')->nullable();
+            $table->string('gad_source')->nullable();
+            $table->string('gad_campaignid')->nullable();
+            $table->timestamps();
+        });
 
-afterEach(function () {
-    // Restore default full schema for other tests
-    Schema::dropIfExists('leads');
-    $migration = include __DIR__.'/../../database/migrations/create_leads_table.php.stub';
-    $migration->up();
-    GoogleAdsConversions::flushColumnCache();
-});
+        GoogleAdsConversions::flushColumnCache();
+    }
 
-it('syncs a gclid conversion to a legacy database table without gbraid/wbraid columns', function () {
-    $gclid = 'EAIaIQobChMI8NL3yPLUlgMVIzIIBR3GmS61EAAYASABEgIcIfD_BwE';
+    protected function tearDown(): void
+    {
+        // Restore default full schema for other tests
+        Schema::dropIfExists('leads');
+        $migration = include __DIR__.'/../../database/migrations/create_leads_table.php.stub';
+        $migration->up();
+        GoogleAdsConversions::flushColumnCache();
 
-    Cache::put(GoogleAdsConversions::CACHE_PREFIX.$gclid, [[
-        'event' => 'Quote Form',
-        'timestamp' => now()->timestamp,
-        'value' => 500.0,
-        'currency' => 'USD',
-        'status' => 'pending',
-    ]]);
-    Cache::put(GoogleAdsConversions::DIRTY_BUCKET_PREFIX.(crc32($gclid) % GoogleAdsConversions::DIRTY_BUCKETS), [$gclid]);
+        parent::tearDown();
+    }
 
-    app(GoogleAdsConversions::class)->syncToDatabase();
+    public function test_it_syncs_a_gclid_conversion_to_a_legacy_database_table_without_gbraid_wbraid_columns(): void
+    {
+        $gclid = 'EAIaIQobChMI8NL3yPLUlgMVIzIIBR3GmS61EAAYASABEgIcIfD_BwE';
 
-    $lead = Lead::where('gclid', $gclid)->first();
-    expect($lead)->not->toBeNull()
-        ->and($lead->getGclid())->toBe($gclid)
-        ->and($lead->getConversions())->toHaveCount(1);
-});
+        Cache::put(GoogleAdsConversions::CACHE_PREFIX.$gclid, [[
+            'event' => 'Quote Form',
+            'timestamp' => now()->timestamp,
+            'value' => 500.0,
+            'currency' => 'USD',
+            'status' => 'pending',
+        ]]);
+        Cache::put(GoogleAdsConversions::DIRTY_BUCKET_PREFIX.(crc32($gclid) % GoogleAdsConversions::DIRTY_BUCKETS), [$gclid]);
 
-it('syncs a gbraid click to gclid column when gbraid column does not exist', function () {
-    $gbraid = '0AAAAAtestgbraid12345';
+        app(GoogleAdsConversions::class)->syncToDatabase();
 
-    Cache::put(GoogleAdsConversions::CACHE_PREFIX.$gbraid, [[
-        'event' => 'Lead Form',
-        'timestamp' => now()->timestamp,
-        'status' => 'pending',
-    ]]);
-    Cache::put(GoogleAdsConversions::LEAD_DATA_PREFIX.$gbraid, [
-        'gbraid' => $gbraid,
-        'landing_page' => '/contact',
-    ]);
-    Cache::put(GoogleAdsConversions::DIRTY_BUCKET_PREFIX.(crc32($gbraid) % GoogleAdsConversions::DIRTY_BUCKETS), [$gbraid]);
+        $lead = Lead::where('gclid', $gclid)->first();
+        $this->assertNotNull($lead);
+        $this->assertSame($gclid, $lead->getGclid());
+        $this->assertCount(1, $lead->getConversions());
+    }
 
-    app(GoogleAdsConversions::class)->syncToDatabase();
+    public function test_it_syncs_a_gbraid_click_to_gclid_column_when_gbraid_column_does_not_exist(): void
+    {
+        $gbraid = '0AAAAAtestgbraid12345';
 
-    $lead = Lead::where('gclid', $gbraid)->first();
-    expect($lead)->not->toBeNull()
-        ->and($lead->getGclid())->toBe($gbraid);
-});
+        Cache::put(GoogleAdsConversions::CACHE_PREFIX.$gbraid, [[
+            'event' => 'Lead Form',
+            'timestamp' => now()->timestamp,
+            'status' => 'pending',
+        ]]);
+        Cache::put(GoogleAdsConversions::LEAD_DATA_PREFIX.$gbraid, [
+            'gbraid' => $gbraid,
+            'landing_page' => '/contact',
+        ]);
+        Cache::put(GoogleAdsConversions::DIRTY_BUCKET_PREFIX.(crc32($gbraid) % GoogleAdsConversions::DIRTY_BUCKETS), [$gbraid]);
 
-it('resolves visitor history on a legacy table without gbraid or wbraid columns', function () {
-    $visitorId = (string) Str::uuid();
-    $gclid = 'gclid-legacy-123';
+        app(GoogleAdsConversions::class)->syncToDatabase();
 
-    Lead::create([
-        'visitor_id' => $visitorId,
-        'gclid' => $gclid,
-    ]);
+        $lead = Lead::where('gclid', $gbraid)->first();
+        $this->assertNotNull($lead);
+        $this->assertSame($gbraid, $lead->getGclid());
+    }
 
-    request()->cookies->set('google_ads_visitor_id', $visitorId);
+    public function test_it_resolves_visitor_history_on_a_legacy_table_without_gbraid_or_wbraid_columns(): void
+    {
+        $visitorId = (string) Str::uuid();
+        $gclid = 'gclid-legacy-123';
 
-    $tracker = app(GoogleAdsConversions::class);
-    expect($tracker->gclid())->toBe($gclid);
-});
+        Lead::create([
+            'visitor_id' => $visitorId,
+            'gclid' => $gclid,
+        ]);
 
-it('warns about missing gbraid/wbraid columns and non-nullable gclid in diagnose command', function () {
-    // Create a lead so reportLocalData runs
-    Lead::create([
-        'gclid' => 'gclid-diag-123',
-        'created_at' => now(),
-    ]);
+        request()->cookies->set('google_ads_visitor_id', $visitorId);
 
-    $this->artisan('ad-conversions:diagnose')
-        ->expectsOutputToContain('Table is missing gbraid/wbraid columns.')
-        ->expectsOutputToContain("Table column 'gclid' is NOT NULL.")
-        ->assertExitCode(1);
-});
+        $tracker = app(GoogleAdsConversions::class);
+        $this->assertSame($gclid, $tracker->gclid());
+    }
 
-it('adds gbraid and wbraid columns and makes gclid nullable via migration', function () {
-    $tracker = app(GoogleAdsConversions::class);
+    public function test_it_warns_about_missing_gbraid_wbraid_columns_and_non_nullable_gclid_in_diagnose_command(): void
+    {
+        // Create a lead so reportLocalData runs
+        Lead::create([
+            'gclid' => 'gclid-diag-123',
+            'created_at' => now(),
+        ]);
 
-    expect(Schema::hasColumn('leads', 'gbraid'))->toBeFalse()
-        ->and(Schema::hasColumn('leads', 'wbraid'))->toBeFalse()
-        ->and($tracker->modelColumnIsNullable('gclid'))->toBeFalse();
+        $this->artisan('ad-conversions:diagnose')
+            ->expectsOutputToContain('Table is missing gbraid/wbraid columns.')
+            ->expectsOutputToContain("Table column 'gclid' is NOT NULL.")
+            ->assertExitCode(1);
+    }
 
-    $migration = include __DIR__.'/../../database/migrations/add_gbraid_and_wbraid_to_leads_table.php.stub';
-    $migration->up();
+    public function test_it_adds_gbraid_and_wbraid_columns_and_makes_gclid_nullable_via_migration(): void
+    {
+        $tracker = app(GoogleAdsConversions::class);
 
-    GoogleAdsConversions::flushColumnCache();
+        $this->assertFalse(Schema::hasColumn('leads', 'gbraid'));
+        $this->assertFalse(Schema::hasColumn('leads', 'wbraid'));
+        $this->assertFalse($tracker->modelColumnIsNullable('gclid'));
 
-    expect(Schema::hasColumn('leads', 'gbraid'))->toBeTrue()
-        ->and(Schema::hasColumn('leads', 'wbraid'))->toBeTrue()
-        ->and($tracker->modelColumnIsNullable('gclid'))->toBeTrue();
+        $migration = include __DIR__.'/../../database/migrations/add_gbraid_and_wbraid_to_leads_table.php.stub';
+        $migration->up();
 
-    // Can now insert a lead with only gbraid and no gclid without SQL integrity constraint violation
-    $lead = Lead::create([
-        'visitor_id' => (string) Str::uuid(),
-        'gbraid' => '0AAAAA_test_braid',
-    ]);
-    expect($lead->getGbraid())->toBe('0AAAAA_test_braid')
-        ->and($lead->getGclid())->toBeNull();
+        GoogleAdsConversions::flushColumnCache();
 
-    // Running again does not throw or fail (idempotent)
-    $migration->up();
-    expect(Schema::hasColumn('leads', 'gbraid'))->toBeTrue()
-        ->and($tracker->modelColumnIsNullable('gclid'))->toBeTrue();
+        $this->assertTrue(Schema::hasColumn('leads', 'gbraid'));
+        $this->assertTrue(Schema::hasColumn('leads', 'wbraid'));
+        $this->assertTrue($tracker->modelColumnIsNullable('gclid'));
 
-    // Down drops braid columns
-    $migration->down();
-    expect(Schema::hasColumn('leads', 'gbraid'))->toBeFalse()
-        ->and(Schema::hasColumn('leads', 'wbraid'))->toBeFalse();
-});
+        // Can now insert a lead with only gbraid and no gclid without SQL integrity constraint violation
+        $lead = Lead::create([
+            'visitor_id' => (string) Str::uuid(),
+            'gbraid' => '0AAAAA_test_braid',
+        ]);
+        $this->assertSame('0AAAAA_test_braid', $lead->getGbraid());
+        $this->assertNull($lead->getGclid());
 
-it('safely syncs a gbraid click when gbraid column exists but gclid is NOT NULL', function () {
-    // Manually add gbraid column without making gclid nullable
-    Schema::table('leads', function (Blueprint $table) {
-        $table->string('gbraid')->nullable()->index();
-    });
-    GoogleAdsConversions::flushColumnCache();
+        // Running again does not throw or fail (idempotent)
+        $migration->up();
+        $this->assertTrue(Schema::hasColumn('leads', 'gbraid'));
+        $this->assertTrue($tracker->modelColumnIsNullable('gclid'));
 
-    $tracker = app(GoogleAdsConversions::class);
-    expect($tracker->modelHasColumn('gbraid'))->toBeTrue()
-        ->and($tracker->modelColumnIsNullable('gclid'))->toBeFalse();
+        // Down drops braid columns
+        $migration->down();
+        $this->assertFalse(Schema::hasColumn('leads', 'gbraid'));
+        $this->assertFalse(Schema::hasColumn('leads', 'wbraid'));
+    }
 
-    $gbraid = '0AAAAA_non_nullable_gclid_test';
+    public function test_it_safely_syncs_a_gbraid_click_when_gbraid_column_exists_but_gclid_is_not_null(): void
+    {
+        // Manually add gbraid column without making gclid nullable
+        Schema::table('leads', function (Blueprint $table) {
+            $table->string('gbraid')->nullable()->index();
+        });
+        GoogleAdsConversions::flushColumnCache();
 
-    Cache::put(GoogleAdsConversions::CACHE_PREFIX.$gbraid, [[
-        'event' => 'Lead Form',
-        'timestamp' => now()->timestamp,
-        'status' => 'pending',
-    ]]);
-    Cache::put(GoogleAdsConversions::LEAD_DATA_PREFIX.$gbraid, [
-        'gbraid' => $gbraid,
-        'landing_page' => '/contact',
-    ]);
-    Cache::put(GoogleAdsConversions::DIRTY_BUCKET_PREFIX.(crc32($gbraid) % GoogleAdsConversions::DIRTY_BUCKETS), [$gbraid]);
+        $tracker = app(GoogleAdsConversions::class);
+        $this->assertTrue($tracker->modelHasColumn('gbraid'));
+        $this->assertFalse($tracker->modelColumnIsNullable('gclid'));
 
-    // syncToDatabase must not throw SQL integrity constraint violation for gclid cannot be null
-    $tracker->syncToDatabase();
+        $gbraid = '0AAAAA_non_nullable_gclid_test';
 
-    $lead = Lead::where('gclid', $gbraid)->first();
-    expect($lead)->not->toBeNull()
-        ->and($lead->getGbraid())->toBe($gbraid)
-        ->and($lead->getGclid())->toBe($gbraid);
-});
+        Cache::put(GoogleAdsConversions::CACHE_PREFIX.$gbraid, [[
+            'event' => 'Lead Form',
+            'timestamp' => now()->timestamp,
+            'status' => 'pending',
+        ]]);
+        Cache::put(GoogleAdsConversions::LEAD_DATA_PREFIX.$gbraid, [
+            'gbraid' => $gbraid,
+            'landing_page' => '/contact',
+        ]);
+        Cache::put(GoogleAdsConversions::DIRTY_BUCKET_PREFIX.(crc32($gbraid) % GoogleAdsConversions::DIRTY_BUCKETS), [$gbraid]);
+
+        // syncToDatabase must not throw SQL integrity constraint violation for gclid cannot be null
+        $tracker->syncToDatabase();
+
+        $lead = Lead::where('gclid', $gbraid)->first();
+        $this->assertNotNull($lead);
+        $this->assertSame($gbraid, $lead->getGbraid());
+        $this->assertSame($gbraid, $lead->getGclid());
+    }
+}

@@ -69,7 +69,7 @@ jobs:
         run: composer show -D
 
       - name: Execute tests
-        run: vendor/bin/pest --ci
+        run: vendor/bin/phpunit
         env:
           DB_CONNECTION: sqlite
           DB_DATABASE: ':memory:'

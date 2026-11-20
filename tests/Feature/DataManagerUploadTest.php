@@ -1,87 +1,96 @@
 <?php
 
+namespace ElectricTomCat\GoogleAdsConversions\Tests\Feature;
+
 use ElectricTomCat\GoogleAdsConversions\ConversionUploader;
 use ElectricTomCat\GoogleAdsConversions\DTO\ConversionPayload;
 use ElectricTomCat\GoogleAdsConversions\Models\Lead;
 use ElectricTomCat\GoogleAdsConversions\Support\GoogleAdsSetup;
+use ElectricTomCat\GoogleAdsConversions\Tests\TestCase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 
-beforeEach(function () {
-    config()->set('google-ads-conversions.upload_api', 'data_manager');
-    config()->set('google-ads-conversions.customer_id', '1234567890');
-    config()->set('google-ads-conversions.login_customer_id', '9998887777');
-    config()->set('google-ads-conversions.client_id', 'test-client-id');
-    config()->set('google-ads-conversions.client_secret', 'test-client-secret');
-    config()->set('google-ads-conversions.refresh_token', 'test-refresh-token');
-    config()->set('google-ads-conversions.events', [
-        'Purchase' => 'customers/1234567890/conversionActions/111222333',
-        'Quote Form' => '444555666',
-    ]);
+class DataManagerUploadTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
 
-    app(ConversionUploader::class)->forgetClient();
-});
+        config()->set('google-ads-conversions.upload_api', 'data_manager');
+        config()->set('google-ads-conversions.customer_id', '1234567890');
+        config()->set('google-ads-conversions.login_customer_id', '9998887777');
+        config()->set('google-ads-conversions.client_id', 'test-client-id');
+        config()->set('google-ads-conversions.client_secret', 'test-client-secret');
+        config()->set('google-ads-conversions.refresh_token', 'test-refresh-token');
+        config()->set('google-ads-conversions.events', [
+            'Purchase' => 'customers/1234567890/conversionActions/111222333',
+            'Quote Form' => '444555666',
+        ]);
 
-it('defaults upload_api to data_manager and includes datamanager scope in OAuth URL', function () {
-    expect(config('google-ads-conversions.upload_api'))->toBe('data_manager');
+        app(ConversionUploader::class)->forgetClient();
+    }
 
-    $setup = new GoogleAdsSetup;
-    $url = $setup->buildAuthorizationUrl('client-123');
+    public function test_it_defaults_upload_api_to_data_manager_and_includes_datamanager_scope_in_oauth_url(): void
+    {
+        $this->assertSame('data_manager', config('google-ads-conversions.upload_api'));
 
-    expect(rawurldecode($url))
-        ->toContain(GoogleAdsSetup::ADWORDS_SCOPE)
-        ->toContain(GoogleAdsSetup::DATA_MANAGER_SCOPE);
-});
+        $setup = new GoogleAdsSetup;
+        $url = rawurldecode($setup->buildAuthorizationUrl('client-123'));
 
-it('uploads pending conversions to Google Data Manager API events:ingest with full payload mapping', function () {
-    config()->set('google-ads-conversions.enhanced_conversions.enabled', true);
+        $this->assertStringContainsString(GoogleAdsSetup::ADWORDS_SCOPE, $url);
+        $this->assertStringContainsString(GoogleAdsSetup::DATA_MANAGER_SCOPE, $url);
+    }
 
-    $timestamp = now()->subHours(8)->timestamp;
+    public function test_it_uploads_pending_conversions_to_google_data_manager_api_events_ingest_with_full_payload_mapping(): void
+    {
+        config()->set('google-ads-conversions.enhanced_conversions.enabled', true);
 
-    $lead = Lead::create([
-        'gclid' => 'EAIaIQobChMI-test-gclid',
-        'conversions' => [[
-            'event' => 'Purchase',
-            'timestamp' => $timestamp,
-            'value' => 20.0,
-            'currency' => 'USD',
-            'order_id' => '977',
-            'consent' => [
-                'ad_user_data' => 'GRANTED',
-                'ad_personalization' => 'DENIED',
-            ],
-            'user_identifiers' => [
-                'email' => 'Customer@Example.com',
-                'phone' => '+14155552671',
-            ],
-            'status' => 'pending',
-        ]],
-    ]);
+        $timestamp = now()->subHours(8)->timestamp;
 
-    $capturedIngestPayload = null;
+        $lead = Lead::create([
+            'gclid' => 'EAIaIQobChMI-test-gclid',
+            'conversions' => [[
+                'event' => 'Purchase',
+                'timestamp' => $timestamp,
+                'value' => 20.0,
+                'currency' => 'USD',
+                'order_id' => '977',
+                'consent' => [
+                    'ad_user_data' => 'GRANTED',
+                    'ad_personalization' => 'DENIED',
+                ],
+                'user_identifiers' => [
+                    'email' => 'Customer@Example.com',
+                    'phone' => '+14155552671',
+                ],
+                'status' => 'pending',
+            ]],
+        ]);
 
-    Http::fake([
-        GoogleAdsSetup::OAUTH_TOKEN_ENDPOINT => Http::response([
-            'access_token' => 'ya29.data-manager-token',
-            'expires_in' => 3599,
-            'token_type' => 'Bearer',
-        ], 200),
-        ConversionUploader::DATA_MANAGER_INGEST_ENDPOINT => function (Request $request) use (&$capturedIngestPayload) {
-            expect($request->hasHeader('Authorization', 'Bearer ya29.data-manager-token'))->toBeTrue();
-            $capturedIngestPayload = $request->data();
+        $capturedIngestPayload = null;
 
-            return Http::response(['requestId' => 'dm-req-123'], 200);
-        },
-    ]);
+        Http::fake([
+            GoogleAdsSetup::OAUTH_TOKEN_ENDPOINT => Http::response([
+                'access_token' => 'ya29.data-manager-token',
+                'expires_in' => 3599,
+                'token_type' => 'Bearer',
+            ], 200),
+            ConversionUploader::DATA_MANAGER_INGEST_ENDPOINT => function (Request $request) use (&$capturedIngestPayload) {
+                $this->assertTrue($request->hasHeader('Authorization', 'Bearer ya29.data-manager-token'));
+                $capturedIngestPayload = $request->data();
 
-    $count = app(ConversionUploader::class)->uploadPendingConversions(0, false);
+                return Http::response(['requestId' => 'dm-req-123'], 200);
+            },
+        ]);
 
-    expect($count)->toBe(1)
-        ->and($capturedIngestPayload)->not->toBeNull()
-        ->and($capturedIngestPayload['validateOnly'])->toBeFalse()
-        ->and($capturedIngestPayload['encoding'])->toBe('HEX')
-        ->and($capturedIngestPayload['destinations'])->toHaveCount(1)
-        ->and($capturedIngestPayload['destinations'][0])->toMatchArray([
+        $count = app(ConversionUploader::class)->uploadPendingConversions(0, false);
+
+        $this->assertSame(1, $count);
+        $this->assertNotNull($capturedIngestPayload);
+        $this->assertFalse($capturedIngestPayload['validateOnly']);
+        $this->assertSame('HEX', $capturedIngestPayload['encoding']);
+        $this->assertCount(1, $capturedIngestPayload['destinations']);
+        $this->assertEquals([
             'reference' => 'dest_1',
             'operatingAccount' => [
                 'accountType' => 'GOOGLE_ADS',
@@ -92,252 +101,258 @@ it('uploads pending conversions to Google Data Manager API events:ingest with fu
                 'accountId' => '9998887777',
             ],
             'productDestinationId' => '111222333',
-        ]);
+        ], $capturedIngestPayload['destinations'][0]);
 
-    $event = $capturedIngestPayload['events'][0];
-    expect($event['destinationReferences'])->toBe(['dest_1'])
-        ->and($event['eventTimestamp'])->toBe(date('Y-m-d\TH:i:sP', $timestamp))
-        ->and($event['eventSource'])->toBe('WEB')
-        ->and($event['adIdentifiers'])->toBe(['gclid' => 'EAIaIQobChMI-test-gclid'])
-        ->and($event['conversionValue'])->toBe(20.0)
-        ->and($event['currency'])->toBe('USD')
-        ->and($event['transactionId'])->toBe('977')
-        ->and($event['consent'])->toBe([
+        $event = $capturedIngestPayload['events'][0];
+        $this->assertSame(['dest_1'], $event['destinationReferences']);
+        $this->assertSame(date('Y-m-d\TH:i:sP', $timestamp), $event['eventTimestamp']);
+        $this->assertSame('WEB', $event['eventSource']);
+        $this->assertSame(['gclid' => 'EAIaIQobChMI-test-gclid'], $event['adIdentifiers']);
+        $this->assertSame(20.0, $event['conversionValue']);
+        $this->assertSame('USD', $event['currency']);
+        $this->assertSame('977', $event['transactionId']);
+        $this->assertSame([
             'adUserData' => 'CONSENT_GRANTED',
             'adPersonalization' => 'CONSENT_DENIED',
-        ])
-        ->and($event['userData']['userIdentifiers'])->toBe([
+        ], $event['consent']);
+        $this->assertSame([
             ['emailAddress' => hash('sha256', 'customer@example.com')],
             ['phoneNumber' => hash('sha256', '+14155552671')],
+        ], $event['userData']['userIdentifiers']);
+
+        $lead->refresh();
+        $this->assertSame('uploaded', $lead->getConversions()[0]['status']);
+        $this->assertArrayHasKey('uploaded_at', $lead->getConversions()[0]);
+    }
+
+    public function test_it_resolves_numeric_conversion_action_ids_directly_without_a_gaql_lookup(): void
+    {
+        Lead::create([
+            'gclid' => 'gclid-numeric-action',
+            'conversions' => [[
+                'event' => 'Quote Form', // mapped to '444555666'
+                'timestamp' => now()->subHours(8)->timestamp,
+                'value' => 50.0,
+                'currency' => 'USD',
+                'status' => 'pending',
+            ]],
         ]);
 
-    $lead->refresh();
-    expect($lead->getConversions()[0]['status'])->toBe('uploaded')
-        ->and($lead->getConversions()[0])->toHaveKey('uploaded_at');
-});
+        $capturedPayload = null;
 
-it('resolves numeric conversion action IDs directly without a GAQL lookup', function () {
-    $lead = Lead::create([
-        'gclid' => 'gclid-numeric-action',
-        'conversions' => [[
-            'event' => 'Quote Form', // mapped to '444555666'
-            'timestamp' => now()->subHours(8)->timestamp,
-            'value' => 50.0,
-            'currency' => 'USD',
-            'status' => 'pending',
-        ]],
-    ]);
+        Http::fake([
+            GoogleAdsSetup::OAUTH_TOKEN_ENDPOINT => Http::response(['access_token' => 'ya29.token'], 200),
+            ConversionUploader::DATA_MANAGER_INGEST_ENDPOINT => function (Request $request) use (&$capturedPayload) {
+                $capturedPayload = $request->data();
 
-    $capturedPayload = null;
+                return Http::response(['requestId' => 'dm-req-456'], 200);
+            },
+        ]);
 
-    Http::fake([
-        GoogleAdsSetup::OAUTH_TOKEN_ENDPOINT => Http::response(['access_token' => 'ya29.token'], 200),
-        ConversionUploader::DATA_MANAGER_INGEST_ENDPOINT => function (Request $request) use (&$capturedPayload) {
-            $capturedPayload = $request->data();
+        $count = app(ConversionUploader::class)->uploadPendingConversions(0, false);
 
-            return Http::response(['requestId' => 'dm-req-456'], 200);
-        },
-    ]);
+        $this->assertSame(1, $count);
+        $this->assertSame('444555666', $capturedPayload['destinations'][0]['productDestinationId']);
+        $this->assertSame('1234567890', $capturedPayload['destinations'][0]['operatingAccount']['accountId']);
+    }
 
-    $count = app(ConversionUploader::class)->uploadPendingConversions(0, false);
+    public function test_it_isolates_a_violating_event_in_a_fast_fail_data_manager_batch_and_re_sends_the_valid_events(): void
+    {
+        $goodLead = Lead::create([
+            'gclid' => 'gclid-good-event',
+            'conversions' => [[
+                'event' => 'Purchase',
+                'timestamp' => now()->subHours(8)->timestamp,
+                'value' => 100.0,
+                'currency' => 'USD',
+                'status' => 'pending',
+            ]],
+        ]);
 
-    expect($count)->toBe(1)
-        ->and($capturedPayload['destinations'][0]['productDestinationId'])->toBe('444555666')
-        ->and($capturedPayload['destinations'][0]['operatingAccount']['accountId'])->toBe('1234567890');
-});
+        $badLead = Lead::create([
+            'gclid' => 'gclid-bad-event',
+            'conversions' => [[
+                'event' => 'Purchase',
+                'timestamp' => now()->subHours(8)->timestamp,
+                'value' => 200.0,
+                'currency' => 'USD',
+                'status' => 'pending',
+            ]],
+        ]);
 
-it('isolates a violating event in a fast-fail Data Manager batch and re-sends the valid events', function () {
-    $goodLead = Lead::create([
-        'gclid' => 'gclid-good-event',
-        'conversions' => [[
-            'event' => 'Purchase',
-            'timestamp' => now()->subHours(8)->timestamp,
-            'value' => 100.0,
-            'currency' => 'USD',
-            'status' => 'pending',
-        ]],
-    ]);
+        $ingestCalls = 0;
 
-    $badLead = Lead::create([
-        'gclid' => 'gclid-bad-event',
-        'conversions' => [[
-            'event' => 'Purchase',
-            'timestamp' => now()->subHours(8)->timestamp,
-            'value' => 200.0,
-            'currency' => 'USD',
-            'status' => 'pending',
-        ]],
-    ]);
+        Http::fake([
+            GoogleAdsSetup::OAUTH_TOKEN_ENDPOINT => Http::response(['access_token' => 'ya29.token'], 200),
+            ConversionUploader::DATA_MANAGER_INGEST_ENDPOINT => function (Request $request) use (&$ingestCalls) {
+                $ingestCalls++;
+                $events = $request->data()['events'] ?? [];
 
-    $ingestCalls = 0;
+                if ($ingestCalls === 1) {
+                    $this->assertCount(2, $events);
 
-    Http::fake([
-        GoogleAdsSetup::OAUTH_TOKEN_ENDPOINT => Http::response(['access_token' => 'ya29.token'], 200),
-        ConversionUploader::DATA_MANAGER_INGEST_ENDPOINT => function (Request $request) use (&$ingestCalls) {
-            $ingestCalls++;
-            $events = $request->data()['events'] ?? [];
-
-            if ($ingestCalls === 1) {
-                expect($events)->toHaveCount(2);
-
-                // First call fails fast because events[1] is invalid
-                return Http::response([
-                    'error' => [
-                        'code' => 400,
-                        'message' => 'There was a problem with the request.',
-                        'status' => 'INVALID_ARGUMENT',
-                        'details' => [
-                            [
-                                '@type' => 'type.googleapis.com/google.rpc.BadRequest',
-                                'fieldViolations' => [
-                                    [
-                                        'field' => 'events.events[1].ad_identifiers.gclid',
-                                        'description' => 'The gclid could not be decoded.',
-                                        'reason' => 'INVALID_FORMAT',
+                    // First call fails fast because events[1] is invalid
+                    return Http::response([
+                        'error' => [
+                            'code' => 400,
+                            'message' => 'There was a problem with the request.',
+                            'status' => 'INVALID_ARGUMENT',
+                            'details' => [
+                                [
+                                    '@type' => 'type.googleapis.com/google.rpc.BadRequest',
+                                    'fieldViolations' => [
+                                        [
+                                            'field' => 'events.events[1].ad_identifiers.gclid',
+                                            'description' => 'The gclid could not be decoded.',
+                                            'reason' => 'INVALID_FORMAT',
+                                        ],
                                     ],
                                 ],
                             ],
                         ],
-                    ],
-                ], 400);
-            }
+                    ], 400);
+                }
 
-            // Second call contains only the valid event (events[0])
-            expect($events)->toHaveCount(1)
-                ->and($events[0]['adIdentifiers']['gclid'])->toBe('gclid-good-event');
+                // Second call contains only the valid event (events[0])
+                $this->assertCount(1, $events);
+                $this->assertSame('gclid-good-event', $events[0]['adIdentifiers']['gclid']);
 
-            return Http::response(['requestId' => 'dm-retry-ok'], 200);
-        },
-    ]);
+                return Http::response(['requestId' => 'dm-retry-ok'], 200);
+            },
+        ]);
 
-    $count = app(ConversionUploader::class)->uploadPendingConversions(0, false);
+        $count = app(ConversionUploader::class)->uploadPendingConversions(0, false);
 
-    expect($count)->toBe(1)
-        ->and($ingestCalls)->toBe(2);
+        $this->assertSame(1, $count);
+        $this->assertSame(2, $ingestCalls);
 
-    expect($goodLead->fresh()->getConversions()[0]['status'])->toBe('uploaded')
-        ->and($badLead->fresh()->getConversions()[0]['status'])->toBe('failed')
-        ->and($badLead->fresh()->getConversions()[0]['error'])->toContain('The gclid could not be decoded.');
-});
+        $this->assertSame('uploaded', $goodLead->fresh()->getConversions()[0]['status']);
+        $this->assertSame('failed', $badLead->fresh()->getConversions()[0]['status']);
+        $this->assertStringContainsString('The gclid could not be decoded.', $badLead->fresh()->getConversions()[0]['error']);
+    }
 
-it('marks all batch conversions as failed with actionable guidance when OAuth token lacks datamanager scope', function () {
-    $lead = Lead::create([
-        'gclid' => 'gclid-missing-scope',
-        'conversions' => [[
-            'event' => 'Purchase',
-            'timestamp' => now()->subHours(8)->timestamp,
-            'value' => 20.0,
-            'currency' => 'USD',
-            'status' => 'pending',
-        ]],
-    ]);
-
-    Http::fake([
-        GoogleAdsSetup::OAUTH_TOKEN_ENDPOINT => Http::response(['access_token' => 'ya29.adwords-only-token'], 200),
-        ConversionUploader::DATA_MANAGER_INGEST_ENDPOINT => Http::response([
-            'error' => [
-                'code' => 403,
-                'message' => 'Request had insufficient authentication scopes.',
-                'status' => 'PERMISSION_DENIED',
-                'details' => [
-                    [
-                        '@type' => 'type.googleapis.com/google.rpc.ErrorInfo',
-                        'reason' => 'ACCESS_TOKEN_SCOPE_INSUFFICIENT',
-                        'domain' => 'googleapis.com',
-                    ],
-                ],
-            ],
-        ], 403),
-    ]);
-
-    $count = app(ConversionUploader::class)->uploadPendingConversions(0, false);
-
-    expect($count)->toBe(0);
-
-    $conv = $lead->fresh()->getConversions()[0];
-    expect($conv['status'])->toBe('failed')
-        ->and($conv['error'])->toContain('https://www.googleapis.com/auth/datamanager')
-        ->and($conv['error'])->toContain('google-ads:install --setup');
-});
-
-it('supports uploadPayloads via the Data Manager API', function () {
-    Http::fake([
-        GoogleAdsSetup::OAUTH_TOKEN_ENDPOINT => Http::response(['access_token' => 'ya29.token'], 200),
-        ConversionUploader::DATA_MANAGER_INGEST_ENDPOINT => Http::response(['requestId' => 'dm-payload-ok'], 200),
-    ]);
-
-    $payload = new ConversionPayload(
-        eventName: 'Purchase',
-        value: 45.0,
-        currency: 'USD',
-        orderId: 'ORD-500',
-        timestamp: now()->subHours(2)->timestamp,
-        gclid: 'gclid-payload-dm',
-    );
-
-    $result = app(ConversionUploader::class)->uploadPayloads([$payload], validateOnly: true);
-
-    expect($result['count'])->toBe(1)
-        ->and($result['errors'])->toBeEmpty();
-});
-
-it('requeues falsely uploaded, failed, or rejected conversions back to pending via ad-conversions:requeue', function () {
-    $lead1 = Lead::create([
-        'gclid' => 'gclid-falsely-uploaded',
-        'conversions' => [
-            [
+    public function test_it_marks_all_batch_conversions_as_failed_with_actionable_guidance_when_oauth_token_lacks_datamanager_scope(): void
+    {
+        $lead = Lead::create([
+            'gclid' => 'gclid-missing-scope',
+            'conversions' => [[
                 'event' => 'Purchase',
-                'timestamp' => now()->subDays(2)->timestamp,
+                'timestamp' => now()->subHours(8)->timestamp,
                 'value' => 20.0,
                 'currency' => 'USD',
-                'order_id' => '977',
-                'status' => 'uploaded',
-                'uploaded_at' => now()->subHours(3)->timestamp,
+                'status' => 'pending',
+            ]],
+        ]);
+
+        Http::fake([
+            GoogleAdsSetup::OAUTH_TOKEN_ENDPOINT => Http::response(['access_token' => 'ya29.adwords-only-token'], 200),
+            ConversionUploader::DATA_MANAGER_INGEST_ENDPOINT => Http::response([
+                'error' => [
+                    'code' => 403,
+                    'message' => 'Request had insufficient authentication scopes.',
+                    'status' => 'PERMISSION_DENIED',
+                    'details' => [
+                        [
+                            '@type' => 'type.googleapis.com/google.rpc.ErrorInfo',
+                            'reason' => 'ACCESS_TOKEN_SCOPE_INSUFFICIENT',
+                            'domain' => 'googleapis.com',
+                        ],
+                    ],
+                ],
+            ], 403),
+        ]);
+
+        $count = app(ConversionUploader::class)->uploadPendingConversions(0, false);
+
+        $this->assertSame(0, $count);
+
+        $conv = $lead->fresh()->getConversions()[0];
+        $this->assertSame('failed', $conv['status']);
+        $this->assertStringContainsString('https://www.googleapis.com/auth/datamanager', $conv['error']);
+        $this->assertStringContainsString('google-ads:install --setup', $conv['error']);
+    }
+
+    public function test_it_supports_upload_payloads_via_the_data_manager_api(): void
+    {
+        Http::fake([
+            GoogleAdsSetup::OAUTH_TOKEN_ENDPOINT => Http::response(['access_token' => 'ya29.token'], 200),
+            ConversionUploader::DATA_MANAGER_INGEST_ENDPOINT => Http::response(['requestId' => 'dm-payload-ok'], 200),
+        ]);
+
+        $payload = new ConversionPayload(
+            eventName: 'Purchase',
+            value: 45.0,
+            currency: 'USD',
+            orderId: 'ORD-500',
+            timestamp: now()->subHours(2)->timestamp,
+            gclid: 'gclid-payload-dm',
+        );
+
+        $result = app(ConversionUploader::class)->uploadPayloads([$payload], validateOnly: true);
+
+        $this->assertSame(1, $result['count']);
+        $this->assertEmpty($result['errors']);
+    }
+
+    public function test_it_requeues_falsely_uploaded_failed_or_rejected_conversions_back_to_pending_via_ad_conversions_requeue(): void
+    {
+        $lead1 = Lead::create([
+            'gclid' => 'gclid-falsely-uploaded',
+            'conversions' => [
+                [
+                    'event' => 'Purchase',
+                    'timestamp' => now()->subDays(2)->timestamp,
+                    'value' => 20.0,
+                    'currency' => 'USD',
+                    'order_id' => '977',
+                    'status' => 'uploaded',
+                    'uploaded_at' => now()->subHours(3)->timestamp,
+                ],
             ],
-        ],
-    ]);
+        ]);
 
-    $lead2 = Lead::create([
-        'gclid' => 'gclid-rejected-conv',
-        'conversions' => [
-            [
-                'event' => 'Quote Form',
-                'timestamp' => now()->subDays(3)->timestamp,
-                'value' => 10.0,
-                'currency' => 'USD',
-                'status' => 'rejected',
-                'rejected_at' => now()->subHours(2)->timestamp,
-                'error' => 'Exceeded maximum retries (5).',
-                'retry_count' => 5,
+        $lead2 = Lead::create([
+            'gclid' => 'gclid-rejected-conv',
+            'conversions' => [
+                [
+                    'event' => 'Quote Form',
+                    'timestamp' => now()->subDays(3)->timestamp,
+                    'value' => 10.0,
+                    'currency' => 'USD',
+                    'status' => 'rejected',
+                    'rejected_at' => now()->subHours(2)->timestamp,
+                    'error' => 'Exceeded maximum retries (5).',
+                    'retry_count' => 5,
+                ],
             ],
-        ],
-    ]);
+        ]);
 
-    // 1. Default invocation resets failed & rejected, leaving uploaded untouched
-    $this->artisan('ad-conversions:requeue')
-        ->expectsOutput('Reset 1 conversion(s) across 1 lead(s) back to pending.')
-        ->assertSuccessful();
+        // 1. Default invocation resets failed & rejected, leaving uploaded untouched
+        $this->artisan('ad-conversions:requeue')
+            ->expectsOutput('Reset 1 conversion(s) across 1 lead(s) back to pending.')
+            ->assertSuccessful();
 
-    expect($lead1->fresh()->getConversions()[0]['status'])->toBe('uploaded');
-    $requeued2 = $lead2->fresh()->getConversions()[0];
-    expect($requeued2['status'])->toBe('pending')
-        ->and($requeued2)->not->toHaveKey('rejected_at')
-        ->and($requeued2)->not->toHaveKey('error')
-        ->and($requeued2)->not->toHaveKey('retry_count');
+        $this->assertSame('uploaded', $lead1->fresh()->getConversions()[0]['status']);
+        $requeued2 = $lead2->fresh()->getConversions()[0];
+        $this->assertSame('pending', $requeued2['status']);
+        $this->assertArrayNotHasKey('rejected_at', $requeued2);
+        $this->assertArrayNotHasKey('error', $requeued2);
+        $this->assertArrayNotHasKey('retry_count', $requeued2);
 
-    // 2. Dry-run with --status=uploaded previews without persisting
-    $this->artisan('ad-conversions:requeue', ['--status' => ['uploaded'], '--dry-run' => true])
-        ->expectsOutput('Dry run: 1 conversion(s) across 1 lead(s) would be reset to pending.')
-        ->assertSuccessful();
+        // 2. Dry-run with --status=uploaded previews without persisting
+        $this->artisan('ad-conversions:requeue', ['--status' => ['uploaded'], '--dry-run' => true])
+            ->expectsOutput('Dry run: 1 conversion(s) across 1 lead(s) would be reset to pending.')
+            ->assertSuccessful();
 
-    expect($lead1->fresh()->getConversions()[0]['status'])->toBe('uploaded');
+        $this->assertSame('uploaded', $lead1->fresh()->getConversions()[0]['status']);
 
-    // 3. Real run with --status=uploaded resets the falsely uploaded conversion back to pending
-    $this->artisan('google-ads:requeue', ['--status' => ['uploaded']])
-        ->expectsOutput('Reset 1 conversion(s) across 1 lead(s) back to pending.')
-        ->assertSuccessful();
+        // 3. Real run with --status=uploaded resets the falsely uploaded conversion back to pending
+        $this->artisan('google-ads:requeue', ['--status' => ['uploaded']])
+            ->expectsOutput('Reset 1 conversion(s) across 1 lead(s) back to pending.')
+            ->assertSuccessful();
 
-    $requeued1 = $lead1->fresh()->getConversions()[0];
-    expect($requeued1['status'])->toBe('pending')
-        ->and($requeued1)->not->toHaveKey('uploaded_at');
-});
+        $requeued1 = $lead1->fresh()->getConversions()[0];
+        $this->assertSame('pending', $requeued1['status']);
+        $this->assertArrayNotHasKey('uploaded_at', $requeued1);
+    }
+}
