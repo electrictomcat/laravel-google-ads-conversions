@@ -27,10 +27,16 @@ class RequeueConversionsCommand extends Command
 
     public function handle(ConversionUploader $uploader): int
     {
-        $statusOptions = array_values(array_filter(array_map(fn ($v) => trim((string) $v), (array) $this->option('status'))));
+        $statusOptions = array_values(array_filter(array_map(
+            fn ($v) => is_scalar($v) ? trim((string) $v) : '',
+            (array) $this->option('status'),
+        )));
         $targetStatuses = $statusOptions !== [] ? $statusOptions : ['failed', 'rejected'];
 
-        $eventFilters = array_values(array_filter(array_map(fn ($v) => trim((string) $v), (array) $this->option('event'))));
+        $eventFilters = array_values(array_filter(array_map(
+            fn ($v) => is_scalar($v) ? trim((string) $v) : '',
+            (array) $this->option('event'),
+        )));
         $leadIds = array_values(array_filter((array) $this->option('lead'), fn ($v) => $v !== null && $v !== ''));
 
         $sinceOption = $this->option('since');
@@ -45,7 +51,7 @@ class RequeueConversionsCommand extends Command
         $dryRun = (bool) $this->option('dry-run');
         $shouldUpload = (bool) $this->option('upload');
 
-        /** @var class-string<HasConversions&Model> $modelClass */
+        /** @var class-string<Model> $modelClass */
         $modelClass = config('google-ads-conversions.model', Lead::class);
 
         $query = $modelClass::query()->whereNotNull('conversions');

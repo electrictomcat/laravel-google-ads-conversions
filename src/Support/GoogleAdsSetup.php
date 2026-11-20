@@ -263,8 +263,8 @@ class GoogleAdsSetup
             $newLines = implode("\n", array_values($remaining));
 
             // If a GOOGLE_ADS_ variable or the section header already exists, append directly after the last GOOGLE_ADS_ line
-            if (preg_match_all('/^GOOGLE_ADS_[A-Z0-9_]+\s*=.*$/m', $content, $matches, PREG_OFFSET_CAPTURE) && ! empty($matches[0])) {
-                $lastMatch = end($matches[0]);
+            if (preg_match_all('/^GOOGLE_ADS_[A-Z0-9_]+\s*=.*$/m', $content, $matches, PREG_OFFSET_CAPTURE)) {
+                $lastMatch = $matches[0][array_key_last($matches[0])];
                 $lastLine = $lastMatch[0];
                 $lastPos = $lastMatch[1];
                 $insertPos = $lastPos + strlen($lastLine);

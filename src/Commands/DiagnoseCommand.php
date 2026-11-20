@@ -114,10 +114,11 @@ class DiagnoseCommand extends Command
         $this->newLine();
         $this->components->info('Our own data');
 
-        /** @var class-string<HasConversions&Model> $modelClass */
+        /** @var class-string<Model> $modelClass */
         $modelClass = config('google-ads-conversions.model', Lead::class);
 
-        $days = max(1, (int) $this->option('days'));
+        $daysOption = $this->option('days');
+        $days = max(1, is_numeric($daysOption) ? (int) $daysOption : 30);
         $since = now()->subDays($days);
 
         $total = $modelClass::query()->where('created_at', '>=', $since)->count();

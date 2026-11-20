@@ -1,99 +1,114 @@
 <?php
 
+namespace ElectricTomCat\GoogleAdsConversions\Tests\Feature;
+
 use ElectricTomCat\GoogleAdsConversions\GoogleAdsConversions;
+use ElectricTomCat\GoogleAdsConversions\Tests\TestCase;
 use Illuminate\Support\Facades\Cache;
 
-beforeEach(function () {
-    app(GoogleAdsConversions::class)->forgetGclid();
-    session()->flush();
-});
+class TrackConversionControllerTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
 
-test('test_it_records_conversion_with_direct_gclid', function () {
-    $response = $this->postJson(route('google-ads-conversions.track'), [
-        'event' => 'Quote Submitted',
-        'value' => 150.50,
-        'currency' => 'USD',
-        'gclid' => 'direct-gclid-12345',
-    ]);
+        app(GoogleAdsConversions::class)->forgetGclid();
+        session()->flush();
+    }
 
-    $response->assertOk()
-        ->assertJson(['success' => true]);
-
-    expect(Cache::has(GoogleAdsConversions::CACHE_PREFIX.'direct-gclid-12345'))->toBeTrue();
-    $cached = Cache::get(GoogleAdsConversions::CACHE_PREFIX.'direct-gclid-12345');
-    expect($cached[0]['event'])->toBe('Quote Submitted')
-        ->and($cached[0]['value'])->toBe(150.50)
-        ->and($cached[0]['currency'])->toBe('USD')
-        ->and($cached[0]['gclid'])->toBe('direct-gclid-12345');
-});
-
-test('test_it_records_conversion_with_direct_gbraid', function () {
-    $response = $this->postJson(route('google-ads-conversions.track'), [
-        'event' => 'App Install Form',
-        'value' => 99.00,
-        'currency' => 'USD',
-        'gbraid' => '0AAAAAgbraid123',
-    ]);
-
-    $response->assertOk()
-        ->assertJson(['success' => true]);
-
-    expect(Cache::has(GoogleAdsConversions::CACHE_PREFIX.'0AAAAAgbraid123'))->toBeTrue();
-    $cached = Cache::get(GoogleAdsConversions::CACHE_PREFIX.'0AAAAAgbraid123');
-    expect($cached[0]['event'])->toBe('App Install Form')
-        ->and($cached[0]['gbraid'])->toBe('0AAAAAgbraid123');
-});
-
-test('test_it_records_conversion_with_direct_wbraid', function () {
-    $response = $this->postJson(route('google-ads-conversions.track'), [
-        'event' => 'Web App Signup',
-        'value' => 45.00,
-        'currency' => 'EUR',
-        'wbraid' => '0AAAAAwbraid456',
-    ]);
-
-    $response->assertOk()
-        ->assertJson(['success' => true]);
-
-    expect(Cache::has(GoogleAdsConversions::CACHE_PREFIX.'0AAAAAwbraid456'))->toBeTrue();
-    $cached = Cache::get(GoogleAdsConversions::CACHE_PREFIX.'0AAAAAwbraid456');
-    expect($cached[0]['event'])->toBe('Web App Signup')
-        ->and($cached[0]['currency'])->toBe('EUR')
-        ->and($cached[0]['wbraid'])->toBe('0AAAAAwbraid456');
-});
-
-test('test_it_falls_back_to_cookie_when_identifiers_omitted_in_body', function () {
-    $response = $this->withCredentials()
-        ->withUnencryptedCookie('google_ads_gclid', 'cookie-gclid-999')
-        ->postJson(route('google-ads-conversions.track'), [
-            'event' => 'Page Navigation: /contact',
-            'value' => 1,
+    public function test_it_records_conversion_with_direct_gclid(): void
+    {
+        $response = $this->postJson(route('google-ads-conversions.track'), [
+            'event' => 'Quote Submitted',
+            'value' => 150.50,
             'currency' => 'USD',
+            'gclid' => 'direct-gclid-12345',
         ]);
 
-    $response->assertOk()
-        ->assertJson(['success' => true]);
+        $response->assertOk()
+            ->assertJson(['success' => true]);
 
-    expect(Cache::has(GoogleAdsConversions::CACHE_PREFIX.'cookie-gclid-999'))->toBeTrue();
-    $cached = Cache::get(GoogleAdsConversions::CACHE_PREFIX.'cookie-gclid-999');
-    expect($cached[0]['event'])->toBe('Page Navigation: /contact');
-});
+        $this->assertTrue(Cache::has(GoogleAdsConversions::CACHE_PREFIX.'direct-gclid-12345'));
+        $cached = Cache::get(GoogleAdsConversions::CACHE_PREFIX.'direct-gclid-12345');
+        $this->assertSame('Quote Submitted', $cached[0]['event']);
+        $this->assertSame(150.50, $cached[0]['value']);
+        $this->assertSame('USD', $cached[0]['currency']);
+        $this->assertSame('direct-gclid-12345', $cached[0]['gclid']);
+    }
 
-test('test_it_validates_required_event_name', function () {
-    $response = $this->postJson(route('google-ads-conversions.track'), [
-        'value' => 10,
-        'gclid' => 'direct-gclid-123',
-    ]);
+    public function test_it_records_conversion_with_direct_gbraid(): void
+    {
+        $response = $this->postJson(route('google-ads-conversions.track'), [
+            'event' => 'App Install Form',
+            'value' => 99.00,
+            'currency' => 'USD',
+            'gbraid' => '0AAAAAgbraid123',
+        ]);
 
-    $response->assertStatus(422)
-        ->assertJsonValidationErrors(['event']);
-});
+        $response->assertOk()
+            ->assertJson(['success' => true]);
 
-test('it returns success false when conversion cannot be attributed', function () {
-    $response = $this->postJson(route('google-ads-conversions.track'), [
-        'event' => 'Unattributed Event',
-    ]);
+        $this->assertTrue(Cache::has(GoogleAdsConversions::CACHE_PREFIX.'0AAAAAgbraid123'));
+        $cached = Cache::get(GoogleAdsConversions::CACHE_PREFIX.'0AAAAAgbraid123');
+        $this->assertSame('App Install Form', $cached[0]['event']);
+        $this->assertSame('0AAAAAgbraid123', $cached[0]['gbraid']);
+    }
 
-    $response->assertOk()
-        ->assertJson(['success' => false]);
-});
+    public function test_it_records_conversion_with_direct_wbraid(): void
+    {
+        $response = $this->postJson(route('google-ads-conversions.track'), [
+            'event' => 'Web App Signup',
+            'value' => 45.00,
+            'currency' => 'EUR',
+            'wbraid' => '0AAAAAwbraid456',
+        ]);
+
+        $response->assertOk()
+            ->assertJson(['success' => true]);
+
+        $this->assertTrue(Cache::has(GoogleAdsConversions::CACHE_PREFIX.'0AAAAAwbraid456'));
+        $cached = Cache::get(GoogleAdsConversions::CACHE_PREFIX.'0AAAAAwbraid456');
+        $this->assertSame('Web App Signup', $cached[0]['event']);
+        $this->assertSame('EUR', $cached[0]['currency']);
+        $this->assertSame('0AAAAAwbraid456', $cached[0]['wbraid']);
+    }
+
+    public function test_it_falls_back_to_cookie_when_identifiers_omitted_in_body(): void
+    {
+        $response = $this->withCredentials()
+            ->withUnencryptedCookie('google_ads_gclid', 'cookie-gclid-999')
+            ->postJson(route('google-ads-conversions.track'), [
+                'event' => 'Page Navigation: /contact',
+                'value' => 1,
+                'currency' => 'USD',
+            ]);
+
+        $response->assertOk()
+            ->assertJson(['success' => true]);
+
+        $this->assertTrue(Cache::has(GoogleAdsConversions::CACHE_PREFIX.'cookie-gclid-999'));
+        $cached = Cache::get(GoogleAdsConversions::CACHE_PREFIX.'cookie-gclid-999');
+        $this->assertSame('Page Navigation: /contact', $cached[0]['event']);
+    }
+
+    public function test_it_validates_required_event_name(): void
+    {
+        $response = $this->postJson(route('google-ads-conversions.track'), [
+            'value' => 10,
+            'gclid' => 'direct-gclid-123',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonValidationErrors(['event']);
+    }
+
+    public function test_it_returns_success_false_when_conversion_cannot_be_attributed(): void
+    {
+        $response = $this->postJson(route('google-ads-conversions.track'), [
+            'event' => 'Unattributed Event',
+        ]);
+
+        $response->assertOk()
+            ->assertJson(['success' => false]);
+    }
+}

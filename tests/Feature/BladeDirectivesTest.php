@@ -1,15 +1,22 @@
 <?php
 
+namespace ElectricTomCat\GoogleAdsConversions\Tests\Feature;
+
 use ElectricTomCat\GoogleAdsConversions\Facades\GoogleAdsConversions;
+use ElectricTomCat\GoogleAdsConversions\Tests\TestCase;
 use Illuminate\Support\Facades\Blade;
 
-it('renders blade directives for hidden click inputs', function () {
-    GoogleAdsConversions::fake('gclid-blade-test');
+class BladeDirectivesTest extends TestCase
+{
+    public function test_it_renders_blade_directives_for_hidden_click_inputs(): void
+    {
+        GoogleAdsConversions::fake('gclid-blade-test');
 
-    $rendered = Blade::render('@googleAdsGclid');
+        $rendered = Blade::render('@googleAdsGclid');
 
-    expect($rendered)->toContain('<input type="hidden" name="gclid" value="gclid-blade-test">');
+        $this->assertStringContainsString('<input type="hidden" name="gclid" value="gclid-blade-test">', $rendered);
 
-    $renderedAll = Blade::render('@googleAdsClickInputs');
-    expect($renderedAll)->toContain('<input type="hidden" name="gclid" value="gclid-blade-test">');
-});
+        $renderedAll = Blade::render('@googleAdsClickInputs');
+        $this->assertStringContainsString('<input type="hidden" name="gclid" value="gclid-blade-test">', $renderedAll);
+    }
+}

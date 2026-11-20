@@ -1,34 +1,42 @@
 <?php
 
+namespace ElectricTomCat\GoogleAdsConversions\Tests\Feature;
+
 use ElectricTomCat\GoogleAdsConversions\GoogleAdsConversions;
 use ElectricTomCat\GoogleAdsConversions\Models\Lead;
+use ElectricTomCat\GoogleAdsConversions\Tests\TestCase;
 
-it('identifies prunable leads older than retention days', function () {
-    config()->set('google-ads-conversions.privacy.retention_days', 90);
+class PruningAndErasureTest extends TestCase
+{
+    public function test_it_identifies_prunable_leads_older_than_retention_days(): void
+    {
+        config()->set('google-ads-conversions.privacy.retention_days', 90);
 
-    $oldLead = Lead::create(['gclid' => 'gclid-old']);
-    $oldLead->timestamps = false;
-    $oldLead->created_at = now()->subDays(91);
-    $oldLead->save();
+        $oldLead = Lead::create(['gclid' => 'gclid-old']);
+        $oldLead->timestamps = false;
+        $oldLead->created_at = now()->subDays(91);
+        $oldLead->save();
 
-    $newLead = Lead::create(['gclid' => 'gclid-new']);
+        $newLead = Lead::create(['gclid' => 'gclid-new']);
 
-    $prunableIds = (new Lead)->prunable()->pluck('id')->all();
+        $prunableIds = (new Lead)->prunable()->pluck('id')->all();
 
-    expect($prunableIds)->toContain($oldLead->id)
-        ->and($prunableIds)->not->toContain($newLead->id);
-});
+        $this->assertContains($oldLead->id, $prunableIds);
+        $this->assertNotContains($newLead->id, $prunableIds);
+    }
 
-it('erases visitor data via forgetVisitor for GDPR right to erasure', function () {
-    $visitorId = 'uuid-gdpr-erasure-123';
+    public function test_it_erases_visitor_data_via_forget_visitor_for_gdpr_right_to_erasure(): void
+    {
+        $visitorId = 'uuid-gdpr-erasure-123';
 
-    Lead::create(['gclid' => 'gclid-gdpr-1', 'visitor_id' => $visitorId]);
-    Lead::create(['gclid' => 'gclid-gdpr-2', 'visitor_id' => $visitorId]);
-    Lead::create(['gclid' => 'gclid-other', 'visitor_id' => 'uuid-other']);
+        Lead::create(['gclid' => 'gclid-gdpr-1', 'visitor_id' => $visitorId]);
+        Lead::create(['gclid' => 'gclid-gdpr-2', 'visitor_id' => $visitorId]);
+        Lead::create(['gclid' => 'gclid-other', 'visitor_id' => 'uuid-other']);
 
-    $deletedCount = app(GoogleAdsConversions::class)->forgetVisitor($visitorId);
+        $deletedCount = app(GoogleAdsConversions::class)->forgetVisitor($visitorId);
 
-    expect($deletedCount)->toBe(2)
-        ->and(Lead::where('visitor_id', $visitorId)->count())->toBe(0)
-        ->and(Lead::where('visitor_id', 'uuid-other')->count())->toBe(1);
-});
+        $this->assertSame(2, $deletedCount);
+        $this->assertSame(0, Lead::where('visitor_id', $visitorId)->count());
+        $this->assertSame(1, Lead::where('visitor_id', 'uuid-other')->count());
+    }
+}

@@ -1322,7 +1322,7 @@ class ConversionUploader
     }
 
     /**
-     * @return class-string<HasConversions&Model>
+     * @return class-string<Model>
      */
     protected function modelClass(): string
     {

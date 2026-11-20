@@ -31,7 +31,7 @@ class UploadConversionsCommand extends Command
         $force = (bool) $this->option('force');
         $delayOption = $this->option('delay');
 
-        $delayHours = $force ? 0 : ($delayOption !== null ? (int) $delayOption : null);
+        $delayHours = $force ? 0 : (is_numeric($delayOption) ? (int) $delayOption : null);
 
         if ($dryRun) {
             $this->warn('Running in DRY-RUN mode (validate_only = true). No actual conversions will be recorded.');
